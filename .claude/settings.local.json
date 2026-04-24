@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --version)",
+      "Bash(npm --version)",
+      "Bash(npx --yes create-next-app@latest . --typescript --tailwind --app --turbopack --src-dir --import-alias \"@/*\" --use-pnpm --eslint --no-install)"
+    ]
+  }
+}
