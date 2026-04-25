@@ -3,7 +3,28 @@
     "allow": [
       "Bash(pnpm --version)",
       "Bash(npm --version)",
-      "Bash(npx --yes create-next-app@latest . --typescript --tailwind --app --turbopack --src-dir --import-alias \"@/*\" --use-pnpm --eslint --no-install)"
+      "Bash(npx --yes create-next-app@latest . --typescript --tailwind --app --turbopack --src-dir --import-alias \"@/*\" --use-pnpm --eslint --no-install)",
+      "Bash(pnpm exec *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(pnpm dev *)",
+      "Bash(command -v vercel)",
+      "Bash(vercel --version)",
+      "Bash(vercel blob *)",
+      "Bash(vercel env *)",
+      "Bash(vercel integration-resource *)",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(curl -sS -w \"home=%{http_code}\\\\n\" -o /dev/null http://localhost:3000/)",
+      "Bash(echo \"tsc=$?\")",
+      "Bash(curl -sS http://localhost:3000/api/presets)",
+      "Bash(curl -sS -w \"%{http_code}\\\\n\" -o /dev/null http://localhost:3000/)",
+      "Bash(curl -sS \"http://localhost:3000/api/preset-image-prompt?path=/presets/studio-direct/asian_model_01.jpg\")",
+      "Bash(curl -sS \"http://localhost:3000/api/preset-image-prompt?path=/presets/studio-direct/asian_model_01.jpg&force=1\")",
+      "Bash(cp /tmp/probe-claude.mjs /Users/gblazer/workspace/sceneify/probe-claude.mjs)",
+      "Bash(sed -i '' 's|import \"dotenv/config\";||' probe-claude.mjs)",
+      "Bash(node --env-file=.env.local probe-claude.mjs)",
+      "Bash(env)",
+      "Bash(xxd /Users/gblazer/workspace/sceneify/.env.local)"
     ]
   }
 }

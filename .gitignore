@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.env*.local
+test-sources/
+
+# runtime state (json db + per-image prompt cache)
+data/
+# user-uploaded source product photos
+public/uploads/
