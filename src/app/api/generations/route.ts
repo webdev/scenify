@@ -32,8 +32,13 @@ const Body = z.object({
   referenceUrls: z.array(z.string()).optional(),
   sizeProfile: z.string().optional(),
   quality: z.enum(["low", "medium", "high", "auto"]).optional(),
+  seed: z.number().int().nonnegative().optional(),
   reusePromptFromGenerationId: z.string().optional(),
 });
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 0x7fffffff);
+}
 
 export type StreamEvent =
   | { type: "started"; generation: Generation }
@@ -82,6 +87,7 @@ export async function POST(req: Request) {
     referenceUrls,
     sizeProfile,
     quality,
+    seed,
     reusePromptFromGenerationId,
   } = parsed.data;
 
@@ -98,13 +104,17 @@ export async function POST(req: Request) {
   const resolvedSizeProfile: SizeProfileId = profile.id;
 
   let reusedConstructedPrompt: string | undefined;
+  let reusedSeed: number | undefined;
   if (reusePromptFromGenerationId) {
     const { getGeneration } = await import("@/lib/db");
     const prior = await getGeneration(reusePromptFromGenerationId);
     if (prior?.constructedPrompt) {
       reusedConstructedPrompt = prior.constructedPrompt;
+      reusedSeed = prior.seed;
     }
   }
+
+  const resolvedSeed: number = seed ?? reusedSeed ?? randomSeed();
 
   const generation: Generation = {
     id: nanoid(12),
@@ -115,6 +125,7 @@ export async function POST(req: Request) {
     size: resolvedSize,
     quality: resolvedQuality,
     sizeProfile: resolvedSizeProfile,
+    seed: resolvedSeed,
     status: "pending",
     constructedPrompt: reusedConstructedPrompt,
     createdAt: new Date().toISOString(),
@@ -181,6 +192,7 @@ export async function POST(req: Request) {
           referenceImageUrls: [sourceAbsolute],
           size: resolvedSize,
           quality: resolvedQuality,
+          seed: resolvedSeed,
           onProgress: (e) => {
             if (e.type === "queued") {
               send({ type: "fal_queued", position: e.position });

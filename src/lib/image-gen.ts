@@ -22,6 +22,7 @@ export interface GenerateImageInput {
   referenceImageUrls: string[];
   size?: ImageSize;
   quality?: ImageQuality;
+  seed?: number;
   onProgress?: (event: FalProgressEvent) => void;
 }
 
@@ -68,6 +69,7 @@ function buildModelInput(
       image_size: input.size ?? "auto",
       quality: input.quality ?? "high",
       num_images: 1,
+      ...(typeof input.seed === "number" ? { seed: input.seed } : {}),
     };
   }
 
@@ -76,6 +78,7 @@ function buildModelInput(
       prompt: input.prompt,
       image_urls: input.referenceImageUrls,
       num_images: 1,
+      ...(typeof input.seed === "number" ? { seed: input.seed } : {}),
     };
   }
 
@@ -87,6 +90,7 @@ function buildModelInput(
     num_images: 1,
     safety_tolerance: "6",
     output_format: "png",
+    ...(typeof input.seed === "number" ? { seed: input.seed } : {}),
   };
 }
 

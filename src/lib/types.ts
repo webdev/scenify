@@ -196,6 +196,8 @@ export interface Generation {
   size: ImageSize;
   quality: ImageQuality;
   sizeProfile?: SizeProfileId;
+  /** Seed passed to the image model. Honored by nano-banana and flux-kontext; gpt-image-2 currently ignores it. */
+  seed?: number;
   status: GenerationStatus;
   constructedPrompt?: string;
   outputUrl?: string;

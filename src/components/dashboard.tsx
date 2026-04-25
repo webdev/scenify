@@ -304,6 +304,7 @@ export default function Dashboard({
         quality?: ImageQuality;
         sizeProfile?: SizeProfileId;
         reusePromptFromGenerationId?: string;
+        seed?: number;
       },
     ) => {
       const tempKey = `${sourceId}:${Date.now()}:${Math.random()}`;
@@ -323,6 +324,7 @@ export default function Dashboard({
             referenceUrls,
             quality: overrides?.quality ?? quality,
             sizeProfile: overrides?.sizeProfile ?? sizeProfile,
+            seed: overrides?.seed,
             reusePromptFromGenerationId: overrides?.reusePromptFromGenerationId,
           }),
         });
@@ -373,12 +375,13 @@ export default function Dashboard({
     [presetId, model, quality, sizeProfile, applyStreamEvent],
   );
 
-  const onUpscaleHigh = useCallback(
+  const onRegenerateNewSeed = useCallback(
     async (gen: Generation) => {
       await runGeneration(gen.sourceId, [], {
-        quality: "high",
+        quality: gen.quality,
         sizeProfile: gen.sizeProfile,
         reusePromptFromGenerationId: gen.id,
+        // omit seed → server generates a fresh random one
       });
     },
     [runGeneration],
@@ -901,7 +904,7 @@ export default function Dashboard({
                             gen={g}
                             preset={presets.find((p) => p.id === g.presetId)}
                             progress={progress.get(g.id) ?? null}
-                            onUpscale={onUpscaleHigh}
+                            onRegenerateNewSeed={onRegenerateNewSeed}
                           />
                         ))}
                       </div>
@@ -1066,12 +1069,12 @@ function GenerationCard({
   gen,
   preset,
   progress,
-  onUpscale,
+  onRegenerateNewSeed,
 }: {
   gen: Generation;
   preset?: Preset;
   progress: ProgressState | null;
-  onUpscale: (gen: Generation) => void;
+  onRegenerateNewSeed: (gen: Generation) => void;
 }) {
   const [open, setOpen] = useState(false);
   const isLive = progress && progress.phase !== "done" && progress.phase !== "error";
@@ -1088,11 +1091,6 @@ function GenerationCard({
         ? "aspect-[3/2]"
         : "aspect-square"
     : "";
-  const canUpscale =
-    gen.status === "succeeded" &&
-    gen.quality !== "high" &&
-    !!gen.constructedPrompt &&
-    !isLive;
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
       <div
@@ -1152,26 +1150,25 @@ function GenerationCard({
           )}
           <QualityBadge quality={gen.quality} />
           <SizeBadge size={gen.size} profile={gen.sizeProfile} />
-        </div>
-        <div className="mt-2 flex items-center gap-2">
-          {gen.constructedPrompt && (
-            <button
-              onClick={() => setOpen((o) => !o)}
-              className="text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
-            >
-              {open ? "Hide prompt" : "Show prompt"}
-            </button>
-          )}
-          {canUpscale && (
-            <button
-              onClick={() => onUpscale(gen)}
-              className="ml-auto rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-500"
-              title="Re-render at high quality with the same prompt"
-            >
-              Upscale → high
-            </button>
+          {typeof gen.seed === "number" && (
+            <SeedBadge
+              seed={gen.seed}
+              onRoll={
+                gen.status === "succeeded" && gen.constructedPrompt
+                  ? () => onRegenerateNewSeed(gen)
+                  : undefined
+              }
+            />
           )}
         </div>
+        {gen.constructedPrompt && (
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="mt-2 text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+          >
+            {open ? "Hide prompt" : "Show prompt"}
+          </button>
+        )}
         {open && gen.constructedPrompt && (
           <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-zinc-50 p-2 text-[11px] leading-relaxed text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
             {gen.constructedPrompt}
@@ -1208,6 +1205,43 @@ function ModelBadge({ model }: { model: ImageModelId }) {
       title={`Rendered by ${meta.short}`}
     >
       {meta.short}
+    </span>
+  );
+}
+
+function SeedBadge({
+  seed,
+  onRoll,
+}: {
+  seed: number;
+  onRoll?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+      <span className="font-mono">seed {seed}</span>
+      <button
+        type="button"
+        onClick={() => {
+          navigator.clipboard.writeText(String(seed));
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1200);
+        }}
+        title="Copy seed"
+        className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+      >
+        {copied ? "✓" : "⧉"}
+      </button>
+      {onRoll && (
+        <button
+          type="button"
+          onClick={onRoll}
+          title="Re-render with a fresh random seed (same prompt)"
+          className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+        >
+          ↻
+        </button>
+      )}
     </span>
   );
 }
