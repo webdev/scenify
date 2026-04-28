@@ -97,7 +97,6 @@ export default function Dashboard({
   const [quality, setQuality] = useState<ImageQuality>("low");
   const [sizeProfile, setSizeProfile] =
     useState<SizeProfileId>("square-1024");
-  const [register, setRegister] = useState<RegisterId>("catalog-dtc");
   const [packPlatform, setPackPlatform] = useState<PackPlatform>("amazon");
   const [refsPage, setRefsPage] = useState(0);
   const [testProductsPage, setTestProductsPage] = useState(0);
@@ -334,7 +333,6 @@ export default function Dashboard({
         sizeProfile?: SizeProfileId;
         reusePromptFromGenerationId?: string;
         seed?: number;
-        register?: RegisterId;
         packId?: string;
         packPlatform?: PackPlatform;
         packRole?: string;
@@ -360,7 +358,6 @@ export default function Dashboard({
             quality: overrides?.quality ?? quality,
             sizeProfile: overrides?.sizeProfile ?? sizeProfile,
             seed: overrides?.seed,
-            register: overrides?.register ?? register,
             reusePromptFromGenerationId: overrides?.reusePromptFromGenerationId,
             packId: overrides?.packId,
             packPlatform: overrides?.packPlatform,
@@ -413,7 +410,7 @@ export default function Dashboard({
         });
       }
     },
-    [presetId, model, quality, sizeProfile, register, applyStreamEvent],
+    [presetId, model, quality, sizeProfile, applyStreamEvent],
   );
 
   const onRegenerateNewSeed = useCallback(
@@ -441,7 +438,6 @@ export default function Dashboard({
             platform: packPlatform,
             model,
             quality,
-            register,
           }),
         });
         const json = await res.json();
@@ -469,7 +465,6 @@ export default function Dashboard({
               quality,
               sizeProfile: shot.sizeProfile as SizeProfileId,
               seed: shot.seed,
-              register,
               packId: shot.packId,
               packPlatform: shot.packPlatform,
               packRole: shot.packRole,
@@ -486,7 +481,7 @@ export default function Dashboard({
         );
       }
     },
-    [presetId, packPlatform, model, quality, register, runGeneration, refresh],
+    [presetId, packPlatform, model, quality, runGeneration, refresh],
   );
 
   const router = useRouter();
@@ -1103,23 +1098,6 @@ export default function Dashboard({
               <option value="medium">Standard · medium (~$0.04)</option>
               <option value="high">Final · high (~$0.17)</option>
               <option value="auto">Auto</option>
-            </select>
-          </div>
-
-          <div className="min-w-[260px]">
-            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Register
-            </label>
-            <select
-              value={register}
-              onChange={(e) => setRegister(e.target.value as RegisterId)}
-              className="mt-2 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-            >
-              {REGISTERS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label} — {r.hint}
-                </option>
-              ))}
             </select>
           </div>
 

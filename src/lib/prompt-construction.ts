@@ -1,6 +1,7 @@
-import { generateText } from "ai";
+import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
-import type { Preset, RegisterConfig, RegisterId } from "./types";
+import { z } from "zod";
+import type { Preset, RegisterId } from "./types";
 import { REGISTERS } from "./types";
 import { describePresetImage } from "./describe-image";
 import type { ColorSwatch } from "./color-extraction";
@@ -13,18 +14,40 @@ const openai = createOpenAI({
 const VISION_MODEL = "gpt-4o";
 const MAX_REFERENCES_PER_CALL = 4;
 
-function buildSystemPrompt(register: RegisterConfig): string {
-  return `You write final image-generation prompts for an image-to-image (edit) endpoint (gpt-image-2 / nano-banana / flux-kontext / flux-2). Your prompts must produce HYPERREALISTIC e-commerce lifestyle photographs in the ${register.label} register, while preserving the exact garment from a source product photo.
+const REGISTER_IDS = REGISTERS.map((r) => r.id) as [RegisterId, ...RegisterId[]];
+
+function buildRegisterCatalog(): string {
+  return REGISTERS.map(
+    (r) => `- id: "${r.id}"
+  label: ${r.label}
+  hint: ${r.hint}
+  brand triad: ${r.brandTriad}
+  pose language: ${r.poseLanguage}
+  lighting: ${r.lighting}
+  skin treatment: ${r.skinTreatment}
+  framing: ${r.framing}
+  closing line: ${r.closingLine}`,
+  ).join("\n\n");
+}
+
+function buildSystemPrompt(): string {
+  return `You write final image-generation prompts for an image-to-image (edit) endpoint (gpt-image-2 / nano-banana / flux-kontext / flux-2). Your prompts must produce HYPERREALISTIC e-commerce lifestyle photographs while preserving the exact garment from a source product photo.
 
 You will be given:
 1. ONE source image of a garment (the user's product). Treat it as the immutable subject.
 2. ONE OR MORE textual scene descriptions, each derived from a reference photograph.
 
-Your output is ONE single block of natural prose, structured as one paragraph or a few short paragraphs. No headings, no bullets, no preamble, no quote marks, no labels. Just the prompt itself.
+Step 1 — PICK A REGISTER. Read the reference scene descriptions and decide which one of the four registers below they most clearly belong to. Choose exactly one. Return its id verbatim in the structured "register" field.
+
+Available registers:
+
+${buildRegisterCatalog()}
+
+Step 2 — WRITE THE PROMPT in the chosen register. Wherever the structure below says "<register …>", substitute the chosen register's value. Return the prose in the structured "prompt" field as ONE single block of natural prose, structured as one paragraph or a few short paragraphs. No headings, no bullets, no preamble, no quote marks, no labels. Just the prompt itself.
 
 Required structure (~450–650 words):
 
-1. OPENING SENTENCE — name the register and brand reference: "Transform this flat-lay product photo into a hyperrealistic ${register.label.toLowerCase()} photograph in the style of ${register.brandTriad} product pages — captured as a real moment with a real camera."
+1. OPENING SENTENCE — name the register and brand reference: "Transform this flat-lay product photo into a hyperrealistic <register label, lower-cased> photograph in the style of <register brand triad> product pages — captured as a real moment with a real camera."
 
 2. GARMENT PRESERVATION — this section is FORENSIC. The image generator will use this description to reconstruct the same exact garment on a model — every detail you omit will be re-imagined incorrectly. You must inventory the source image and call out, with specific counts and exact descriptions:
    - The garment category and silhouette (e.g., "a Western-style trucker denim jacket with a slim-cropped fit ending at the high hip").
@@ -37,15 +60,17 @@ Required structure (~450–650 words):
    - Wear and condition cues: any pulls, fraying, repairs, distressing, fading patterns; if the garment is brand-new and unworn, say so.
    Then end the block with the hard preservation directive (verbatim, do not paraphrase): "Do not redesign, redraw, restyle, recolor, or substitute any part of this garment. The button count is fixed, the pocket configuration is fixed, the stitching color and pattern are fixed, the wash and fade pattern are fixed, the silhouette and length are fixed, the collar and cuff styles are fixed. The model is wearing this exact garment — not a similar one, not a 'representative example' — the same physical piece, transferred onto a body in the scene described."
 
-3. SCENE — describe how the garment is being worn (open/closed/buttoned/layered), the model (apparent age range, hair, skin tone, build, posture, facial expression with a specific naturalistic nuance), the backdrop, and the framing. Pose register for THIS prompt: ${register.poseLanguage}.
+3. SCENE — describe how the garment is being worn (open/closed/buttoned/layered), the model (apparent age range, hair, skin tone, build, posture, facial expression with a specific naturalistic nuance), the backdrop, and the framing. Pose register for THIS prompt: <register pose language>.
 
-4. LIGHTING — ${register.lighting}.
+   MODEL GENDER — derive from the SOURCE garment, not the reference images. Read the source garment's cut, fit, branding, and category and decide whether it's a men's cut, women's cut, or unisex piece, then pick a model whose gender matches that cut. Reference images that show a different-gender model define ONLY scene/lighting/pose register — NEVER override the source garment's gender targeting. Examples: men's cargo shorts → male model; women's bandeau → female model; oversized boxy hoodie with no gendered cues → either. If genuinely ambiguous, default to the gender most often shown in the reference set, but only as a tiebreaker. State the chosen gender in the prompt explicitly ("a male model", "a female model").
+
+4. LIGHTING — <register lighting>.
 
 5. QUALITY / RENDERING — be specific and dense. Include all of:
    - Camera and lens: a real specific body + lens at a specific aperture (e.g., "shot on a Sony A7IV with an 85mm f/1.4 GM lens at f/2.0, ISO 400, 1/250s" or "Fujifilm X-T5 with the 56mm f/1.2 at f/2.0"). Pick what fits the register and scene.
-   - Framing: ${register.framing}.
+   - Framing: <register framing>.
    - SKIN — RAW UNRETOUCHED PHOTOGRAPHY (this is non-negotiable; lead the rendering description with this): visible pore texture across forehead, nose, T-zone, cheeks, and chin; fine vellus / peach-fuzz hair on the upper lip and along the jawline catching light; subtle redness in capillary regions (around the nostrils, inner corners of the eyes, the bridge of the nose, the cupid's bow); micro-creases at the outer corners of the eyes and below the lower lash line when the expression is relaxed; individual eyebrow hairs not airbrushed; natural lip texture with small vertical grooves and slightly varied color (NOT lipstick-uniform); a single small natural mark — a freckle, faint mole, tiny scar, or a small acne mark — placed where it would naturally occur. Skin tone has the warmth of real subsurface blood and faint blue-green undertones in shadowed areas. ABSOLUTELY NO airbrushing, NO beauty filter, NO digital skin smoothing, NO glossy plastic finish, NO perfectly even tone — the skin must read as a real human being photographed without retouching, the way it appears in raw editorial photography (Wolfgang Tillmans, Juergen Teller, Tyrone Lebon style). If the skin in the output looks smooth, plastic, glossy, airbrushed, or uniformly toned, this is a failure.
-   - Skin treatment for THIS register (apply on top of the raw-skin baseline above): ${register.skinTreatment}.
+   - Skin treatment for THIS register (apply on top of the raw-skin baseline above): <register skin treatment>.
    - Hair: individual strands visible, a few natural flyaways at the hairline and crown, scalp visible at the part where natural, color variation between roots and ends.
    - Subsurface scattering in lit skin (warm translucency through ears, lids, fingertips); micro-shadows under nose, chin, lip, lashes.
    - Fabric: realistic drape with authentic creases where the body bends, thread-level texture on knits and wovens, weave-level highlights where light grazes the surface, hardware highlights consistent with light direction.
@@ -53,7 +78,7 @@ Required structure (~450–650 words):
    - Color science: film-like rolloff in highlights, restrained saturation, true skin tones with the warmth of subsurface blood, faint cool or green cast in shadows depending on the actual light source.
    - One or two atmospheric tells of a real captured moment (a single dust mote suspended in a light beam, faint motion blur on a moving strand of hair, a fingerprint smudge on a surface).
 
-6. CLOSING / NEGATIVE DIRECTION — close with: "${register.closingLine.replace("[BRAND_TRIAD]", register.brandTriad)} AVOID THE AI LOOK: avoid plastic-smooth skin, perfectly symmetrical features, idealized model-agency faces, glossy airbrushed cheeks, overly clean bokeh, identical pupil reflections, impossibly even lighting, identical-twin facial proportions, any sense of digital perfection. The output must look like a real photograph of a real human being captured by a real photographer in a real moment. Do not make it look like a fashion magazine spread, do not make it look like a catalog flat, and absolutely do not make it look like a render or AI image."
+6. CLOSING / NEGATIVE DIRECTION — close with: "<register closing line, with [BRAND_TRIAD] replaced by the register's brand triad> AVOID THE AI LOOK: avoid plastic-smooth skin, perfectly symmetrical features, idealized model-agency faces, glossy airbrushed cheeks, overly clean bokeh, identical pupil reflections, impossibly even lighting, identical-twin facial proportions, any sense of digital perfection. The output must look like a real photograph of a real human being captured by a real photographer in a real moment. Do not make it look like a fashion magazine spread, do not make it look like a catalog flat, and absolutely do not make it look like a render or AI image."
 
 Hard rules:
 - Never invent branding or details not visible in the source.
@@ -78,7 +103,6 @@ export async function constructPrompt(args: {
   sourceImageBase64: string;
   sourceImageMimeType: string;
   referenceUrlsOverride?: string[];
-  register?: RegisterId;
   /** Optional override for the framing language. Used by listing-pack shots
    * to vary angle/crop while keeping the rest of the scene constant. */
   shotFraming?: string;
@@ -86,19 +110,15 @@ export async function constructPrompt(args: {
    * Injected as explicit values so the image generator has hard targets,
    * not interpretive prose. Phase 1 of color verification. */
   sourceColors?: ColorSwatch[];
-}): Promise<string> {
+}): Promise<{ prompt: string; register: RegisterId }> {
   const {
     preset,
     sourceImageBase64,
     sourceImageMimeType,
     referenceUrlsOverride,
-    register,
     shotFraming,
     sourceColors,
   } = args;
-
-  const registerConfig =
-    REGISTERS.find((r) => r.id === register) ?? REGISTERS[0];
 
   const pool = referenceUrlsOverride?.length
     ? referenceUrlsOverride
@@ -139,26 +159,31 @@ REQUIRED FRAMING for this specific shot (this OVERRIDES whatever framing the ref
     sourceColors && sourceColors.length > 0
       ? `
 
-REQUIRED COLOR ANCHORS (extracted from the source image — these are the actual pixel values to render, NOT interpretive prose): ${describeForPrompt(
+REQUIRED COLOR ANCHORS (sampled from the source image): ${describeForPrompt(
           sourceColors,
-        )}. Write the GARMENT PRESERVATION block so it explicitly names these HEX values for the corresponding garment regions (body color, hardware accent, fade highlights, lining, contrast stitching, etc., as applicable). Do not paraphrase the colors — quote the HEX strings verbatim. The image generator must land on these exact values; any color shift greater than ~10 ΔE is a failure.`
+        )}.
+
+These are raw dominant-pixel values — they may include background/floor/surface colors mixed in with the actual garment. Look at the source image carefully and decide which HEX values belong to the GARMENT itself (body fabric, hardware, contrast stitching, fade highlights, lining) and which belong to the SETTING (floor, table, hanger, wall, sheet). Quote ONLY the garment HEX values verbatim in the GARMENT PRESERVATION block, mapped to their specific regions ("body color: #XXXXXX", "copper buttons: #XXXXXX", etc.). Discard any swatch that's clearly the surface the garment is sitting on. For dark or saturated garments specifically (indigo denim, charcoal, deep burgundy, forest green), it is critical to land within ~8 ΔE of the source garment's body color — those are the colors that drift the most under typical e-commerce lighting and the buyer notices immediately. Restate the garment's body color HEX at least twice in different sentences to anchor it strongly.`
       : "";
 
   const userText = `Preset: ${preset.name}
-${preset.description}
-Register: ${registerConfig.label} — ${registerConfig.hint}${framingDirective}${colorDirective}
+${preset.description}${framingDirective}${colorDirective}
 
 The attached image is the SOURCE garment to preserve. Below are ${
     refDescriptions.filter((r) => r.prompt.length > 0).length
-  } textual scene descriptions derived from reference photographs that define the target visual register. Synthesize them — do not concatenate them verbatim.
+  } textual scene descriptions derived from reference photographs that define the target visual register. Read them, pick the single best-fitting register from the catalog in the system prompt, then synthesize the scene descriptions — do not concatenate them verbatim — in that register.
 
 ${referenceBlock}
 
-Now produce the final image-generation prompt as a single block of natural prose, in the ${registerConfig.label} register, following the required structure. Output ONLY the prompt.`;
+Return the chosen register id in the "register" field and the final image-generation prompt as a single block of natural prose in the "prompt" field, following the required structure.`;
 
-  const { text } = await generateText({
+  const { object } = await generateObject({
     model: openai(VISION_MODEL),
-    system: buildSystemPrompt(registerConfig),
+    system: buildSystemPrompt(),
+    schema: z.object({
+      register: z.enum(REGISTER_IDS),
+      prompt: z.string().min(1),
+    }),
     messages: [
       {
         role: "user",
@@ -172,8 +197,8 @@ Now produce the final image-generation prompt as a single block of natural prose
         ],
       },
     ],
-    maxOutputTokens: 1500,
+    maxOutputTokens: 1800,
   });
 
-  return text.trim();
+  return { prompt: object.prompt.trim(), register: object.register };
 }

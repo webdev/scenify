@@ -15,14 +15,6 @@ const Body = z.object({
     .enum(["gpt-image-2", "nano-banana-2", "flux-kontext", "flux-2"])
     .default("gpt-image-2"),
   quality: z.enum(["low", "medium", "high", "auto"]).default("low"),
-  register: z
-    .enum([
-      "catalog-dtc",
-      "editorial-fashion",
-      "sun-drenched-lifestyle",
-      "studio-glamour",
-    ])
-    .default("catalog-dtc"),
 });
 
 function randomSeed(): number {
@@ -52,8 +44,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }
-  const { sourceId, presetId, platform, model, quality, register } =
-    parsed.data;
+  const { sourceId, presetId, platform, model, quality } = parsed.data;
 
   const [source, preset] = await Promise.all([
     getSource(sourceId),
@@ -85,7 +76,6 @@ export async function POST(req: Request) {
     platform,
     model,
     quality,
-    register,
     seed,
     sourceId,
     presetId,

@@ -36,14 +36,6 @@ const Body = z.object({
   sizeProfile: z.string().optional(),
   quality: z.enum(["low", "medium", "high", "auto"]).optional(),
   seed: z.number().int().nonnegative().optional(),
-  register: z
-    .enum([
-      "catalog-dtc",
-      "editorial-fashion",
-      "sun-drenched-lifestyle",
-      "studio-glamour",
-    ])
-    .optional(),
   reusePromptFromGenerationId: z.string().optional(),
   // Listing-pack fields. When packId is set, this generation is part of a
   // multi-shot pack. shotFraming overrides the framing language in the
@@ -107,7 +99,6 @@ export async function POST(req: Request) {
     sizeProfile,
     quality,
     seed,
-    register,
     reusePromptFromGenerationId,
     packId,
     packPlatform,
@@ -130,7 +121,7 @@ export async function POST(req: Request) {
 
   let reusedConstructedPrompt: string | undefined;
   let reusedSeed: number | undefined;
-  let reusedRegister: typeof register | undefined;
+  let reusedRegister: Generation["register"] | undefined;
   if (reusePromptFromGenerationId) {
     const { getGeneration } = await import("@/lib/db");
     const prior = await getGeneration(reusePromptFromGenerationId);
@@ -142,7 +133,6 @@ export async function POST(req: Request) {
   }
 
   const resolvedSeed: number = seed ?? reusedSeed ?? randomSeed();
-  const resolvedRegister = register ?? reusedRegister ?? "catalog-dtc";
 
   const generation: Generation = {
     id: nanoid(12),
@@ -154,7 +144,7 @@ export async function POST(req: Request) {
     quality: resolvedQuality,
     sizeProfile: resolvedSizeProfile,
     seed: resolvedSeed,
-    register: resolvedRegister,
+    register: reusedRegister,
     status: "pending",
     constructedPrompt: reusedConstructedPrompt,
     packId,
@@ -202,16 +192,20 @@ export async function POST(req: Request) {
           const imageBase64 = sourceBuf.toString("base64");
 
           send({ type: "phase", phase: "constructing_prompt" });
-          constructedPrompt = await constructPrompt({
+          const constructed = await constructPrompt({
             preset,
             sourceImageBase64: imageBase64,
             sourceImageMimeType: sourceMime,
             referenceUrlsOverride: referenceUrls,
-            register: resolvedRegister,
             shotFraming,
             sourceColors,
           });
-          await updateGeneration(generation.id, { constructedPrompt });
+          constructedPrompt = constructed.prompt;
+          generation.register = constructed.register;
+          await updateGeneration(generation.id, {
+            constructedPrompt,
+            register: constructed.register,
+          });
           send({ type: "prompt", constructedPrompt });
         }
 
