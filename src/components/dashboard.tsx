@@ -599,7 +599,9 @@ export default function Dashboard({
           <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
             Preset
           </label>
-          <div className="sticky top-0 z-40 -mx-6 mt-3 flex gap-3 overflow-x-auto bg-white/95 px-6 pb-3 pt-3 backdrop-blur dark:bg-zinc-900/95">
+          <div
+            className="sticky top-0 z-40 -mx-6 mt-3 grid auto-cols-[minmax(144px,1fr)] grid-flow-col grid-rows-2 gap-3 overflow-x-auto bg-white/95 px-6 pb-3 pt-3 backdrop-blur dark:bg-zinc-900/95"
+          >
             <button
               type="button"
               onClick={async () => {
@@ -622,7 +624,7 @@ export default function Dashboard({
                 }
               }}
               className="flex shrink-0 flex-col items-center justify-center rounded-lg border-2 border-dashed border-zinc-300 bg-zinc-50/50 text-xs text-zinc-500 transition hover:border-emerald-500 hover:bg-emerald-50/50 hover:text-emerald-700 dark:border-zinc-700 dark:bg-zinc-900/50 dark:hover:border-emerald-400 dark:hover:bg-emerald-950/30 dark:hover:text-emerald-300"
-              style={{ width: 144, height: 198 }}
+              style={{ height: 198 }}
               title="Create a new preset"
             >
               <span className="text-2xl">+</span>
@@ -757,7 +759,6 @@ export default function Dashboard({
                         ? "border-emerald-500 ring-2 ring-emerald-500/30"
                         : "border-zinc-200 hover:border-zinc-500 dark:border-zinc-800 dark:hover:border-zinc-500"
                   }`}
-                  style={{ width: 144 }}
                 >
                   <div className="relative aspect-square w-full bg-zinc-100 dark:bg-zinc-950">
                     {previewUrl ? (
@@ -808,12 +809,58 @@ export default function Dashboard({
                     {selectedRefs.size} selected
                   </span>
                   {selectedRefs.size > 0 && (
-                    <button
-                      onClick={() => setSelectedRefs(new Set())}
-                      className="underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
-                    >
-                      clear
-                    </button>
+                    <>
+                      <button
+                        onClick={() => setSelectedRefs(new Set())}
+                        className="underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+                      >
+                        clear
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const count = selectedRefs.size;
+                          if (
+                            !confirm(
+                              `Delete ${count} reference image${count === 1 ? "" : "s"}? This can't be undone.`,
+                            )
+                          )
+                            return;
+                          const ids = activePreset.referenceImages
+                            .filter((r) => selectedRefs.has(r.url))
+                            .map((r) => r.id);
+                          try {
+                            const res = await fetch(
+                              "/api/admin/preset-images/delete-batch",
+                              {
+                                method: "POST",
+                                headers: {
+                                  "content-type": "application/json",
+                                },
+                                body: JSON.stringify({ imageIds: ids }),
+                              },
+                            );
+                            const json = await res.json();
+                            if (!res.ok)
+                              throw new Error(
+                                json?.error ?? `HTTP ${res.status}`,
+                              );
+                            setSelectedRefs(new Set());
+                            setDropToast(
+                              `Deleted ${json.deleted} image${json.deleted === 1 ? "" : "s"}`,
+                            );
+                            window.setTimeout(() => setDropToast(null), 2500);
+                            router.refresh();
+                          } catch (err) {
+                            alert(
+                              `Bulk delete failed: ${err instanceof Error ? err.message : err}`,
+                            );
+                          }
+                        }}
+                        className="rounded bg-rose-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white hover:bg-rose-500"
+                      >
+                        Delete {selectedRefs.size}
+                      </button>
+                    </>
                   )}
                   <button
                     onClick={() =>
