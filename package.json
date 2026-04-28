@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL OPENAI_API_KEY OPENAI_BASE_URL; next dev",
+    "dev:op": "unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL OPENAI_API_KEY OPENAI_BASE_URL; op run --env-file=.env.op.tpl -- next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
