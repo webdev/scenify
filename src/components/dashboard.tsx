@@ -104,6 +104,8 @@ export default function Dashboard({
     null,
   );
   const [dropToast, setDropToast] = useState<string | null>(null);
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const [regeneratingNames, setRegeneratingNames] = useState(false);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(
@@ -591,9 +593,52 @@ export default function Dashboard({
 
       <section className="mb-12 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mb-6">
-          <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
-            Preset
-          </label>
+          <div className="flex items-center justify-between gap-3">
+            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Preset
+            </label>
+            <button
+              type="button"
+              disabled={regeneratingNames}
+              onClick={async () => {
+                if (
+                  !confirm(
+                    "Regenerate creative names + taglines for all presets that don't have a tagline yet? You can edit each one after.",
+                  )
+                )
+                  return;
+                setRegeneratingNames(true);
+                try {
+                  const res = await fetch(
+                    "/api/admin/presets/regenerate-names",
+                    {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({}),
+                    },
+                  );
+                  const json = await res.json();
+                  if (!res.ok)
+                    throw new Error(json?.error ?? `HTTP ${res.status}`);
+                  setDropToast(
+                    `Renamed ${json.updated} preset${json.updated === 1 ? "" : "s"}`,
+                  );
+                  window.setTimeout(() => setDropToast(null), 2500);
+                  router.refresh();
+                } catch (err) {
+                  alert(
+                    `Couldn't regenerate names: ${err instanceof Error ? err.message : err}`,
+                  );
+                } finally {
+                  setRegeneratingNames(false);
+                }
+              }}
+              className="text-[11px] text-zinc-500 underline underline-offset-2 hover:text-zinc-800 disabled:opacity-50 dark:hover:text-zinc-200"
+              title="Use AI to write a creative name + uppercase tagline for any preset that doesn't have a tagline yet"
+            >
+              {regeneratingNames ? "Renaming…" : "Regenerate names"}
+            </button>
+          </div>
           <div
             className="sticky top-0 z-40 -mx-6 mt-3 grid auto-cols-[minmax(144px,1fr)] grid-flow-col grid-rows-2 gap-3 overflow-x-auto bg-white/95 px-6 pb-3 pt-3 backdrop-blur dark:bg-zinc-900/95"
           >
@@ -630,9 +675,17 @@ export default function Dashboard({
               const previewUrl = p.referenceImageUrls[0];
               const isDropTarget = dropTargetPresetId === p.dbId;
               return (
-                <button
+                <div
                   key={p.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setPresetId(p.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setPresetId(p.id);
+                    }
+                  }}
                   onDragEnter={(e) => {
                     e.preventDefault();
                     setDropTargetPresetId(p.dbId);
@@ -745,9 +798,8 @@ export default function Dashboard({
                       await onAddImageToPreset(p.dbId, p.name, url);
                     }
                   }}
-                  type="button"
                   aria-pressed={isActive}
-                  className={`group relative shrink-0 overflow-hidden rounded-lg border-2 text-left transition ${
+                  className={`group relative shrink-0 cursor-pointer overflow-hidden rounded-lg border-2 text-left transition focus:outline-none focus:ring-2 focus:ring-emerald-500/40 ${
                     isDropTarget
                       ? "border-violet-500 ring-2 ring-violet-500/40"
                       : isActive
@@ -783,12 +835,44 @@ export default function Dashboard({
                     )}
                   </div>
                   <div className="px-2 py-1.5">
-                    <div className="truncate text-xs font-medium">{p.name}</div>
-                    <div className="text-[10px] text-zinc-500">
+                    <div
+                      className="truncate font-serif text-sm italic leading-tight text-zinc-900 dark:text-zinc-50"
+                      title={p.name}
+                    >
+                      {p.name}
+                    </div>
+                    {p.description ? (
+                      <div
+                        className="mt-0.5 truncate text-[9px] uppercase tracking-[0.14em] text-zinc-500"
+                        title={p.description}
+                      >
+                        {p.description}
+                      </div>
+                    ) : null}
+                    <div className="mt-1 text-[10px] text-zinc-400">
                       {p.referenceImageUrls.length} ref
                     </div>
                   </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingPresetId(p.dbId);
+                    }}
+                    className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/85 text-zinc-700 opacity-0 shadow-sm backdrop-blur transition hover:bg-white hover:text-zinc-900 group-hover:opacity-100 dark:bg-zinc-900/85 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    title="Edit name & tagline"
+                    aria-label="Edit preset"
+                  >
+                    <svg
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      className="h-3.5 w-3.5"
+                      aria-hidden="true"
+                    >
+                      <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.082-.286.235-.547.445-.758l8.61-8.61Z" />
+                    </svg>
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -1506,6 +1590,187 @@ export default function Dashboard({
           onClose={() => setInspectImage(null)}
         />
       )}
+      {editingPresetId && (
+        <EditPresetModal
+          preset={
+            presets.find((p) => p.dbId === editingPresetId) ?? null
+          }
+          onClose={() => setEditingPresetId(null)}
+          onSaved={() => {
+            setEditingPresetId(null);
+            router.refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditPresetModal({
+  preset,
+  onClose,
+  onSaved,
+}: {
+  preset: Preset | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(preset?.name ?? "");
+  const [description, setDescription] = useState(preset?.description ?? "");
+  const [saving, setSaving] = useState(false);
+  const [rerolling, setRerolling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  if (!preset) return null;
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/presets/${preset.dbId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), description: description.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reroll = async () => {
+    setRerolling(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/presets/regenerate-names`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ presetIds: [preset.dbId], force: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      const result = json.results?.[0];
+      if (result) {
+        setName(result.name);
+        setDescription(result.description);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRerolling(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-zinc-500">
+              Edit preset
+            </div>
+            <div className="mt-1 font-mono text-xs text-zinc-500">
+              {preset.id}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            aria-label="Close"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M3.22 3.22a.75.75 0 0 1 1.06 0L8 6.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L9.06 8l3.72 3.72a.75.75 0 1 1-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 1 1-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 0 1 0-1.06z" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          <div>
+            <label className="block text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+              Name
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Studio Athletic"
+              className="mt-1.5 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 font-serif text-base italic dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+              Tagline
+            </label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="STUDIO · SOFT STROBE"
+              className="mt-1.5 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs uppercase tracking-[0.14em] dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <div className="mt-1 text-[10px] text-zinc-500">
+              Two or three uppercase words separated by &nbsp;·&nbsp;
+            </div>
+          </div>
+          {error && (
+            <div className="rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-5 py-3 dark:border-zinc-800">
+          <button
+            type="button"
+            onClick={reroll}
+            disabled={rerolling || saving}
+            className="text-xs text-zinc-500 underline underline-offset-2 hover:text-zinc-800 disabled:opacity-50 dark:hover:text-zinc-200"
+            title="Re-roll the name + tagline using AI"
+          >
+            {rerolling ? "Re-rolling…" : "Re-roll with AI"}
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving || rerolling || !name.trim()}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

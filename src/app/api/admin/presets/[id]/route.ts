@@ -1,11 +1,52 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { del } from "@vercel/blob";
 import { auth, isAdminEmail } from "@/lib/auth";
 import { getDb, schema } from "@/lib/db/client";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+const PatchBody = z.object({
+  name: z.string().min(1).max(120).optional(),
+  description: z.string().max(500).optional(),
+});
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!session?.user?.email || !isAdminEmail(session.user.email)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  const { id: presetId } = await params;
+  const json = await req.json().catch(() => null);
+  const parsed = PatchBody.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  }
+  const patch = parsed.data;
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "no fields to update" }, { status: 400 });
+  }
+  const db = getDb();
+  const updated = await db
+    .update(schema.preset)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(schema.preset.id, presetId))
+    .returning({
+      id: schema.preset.id,
+      slug: schema.preset.slug,
+      name: schema.preset.name,
+      description: schema.preset.description,
+    });
+  if (updated.length === 0) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  return NextResponse.json({ preset: updated[0] });
+}
 
 export async function DELETE(
   _req: Request,
