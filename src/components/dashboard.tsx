@@ -870,9 +870,13 @@ export default function Dashboard({
                             select all favorites
                           </button>
                         </div>
-                        <div className="flex gap-2 overflow-x-auto pb-1">
+                        <div className="flex gap-3 overflow-x-auto pb-2">
                           {favorites.map((f) => {
                             const isSel = selectedRefs.has(f.url);
+                            const aspect =
+                              (f.width || 1) / (f.height || 1);
+                            const ROW_H = 260;
+                            const w = Math.round(ROW_H * aspect);
                             return (
                               <button
                                 key={f.id}
@@ -884,7 +888,7 @@ export default function Dashboard({
                                     ? "border-emerald-500 ring-2 ring-emerald-500/40"
                                     : "border-zinc-200 hover:border-zinc-500 dark:border-zinc-800 dark:hover:border-zinc-500"
                                 }`}
-                                style={{ width: 88, height: 88 }}
+                                style={{ width: w, height: ROW_H }}
                               >
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img

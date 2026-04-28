@@ -11,16 +11,14 @@ interface Props {
   selectedUrls: Set<string>;
   onToggleSelect: (url: string) => void;
   onInspect?: (url: string) => void;
-  /** When true, hovering an image reveals a small delete (×) button. */
   enableDelete?: boolean;
-  /** When true, shows a heart toggle for favoriting. */
   enableFavorite?: boolean;
-  /** Override sizing knobs (used by the small "Favorites" strip). */
+  /** Source preset's DB id — set when dragged images should be MOVED. */
+  sourcePresetDbId?: string;
+  /** Target row height. Partial rows are capped at this same value so a
+   * single image at the end of a page doesn't render giant. */
   targetRowHeight?: number;
   spacing?: number;
-  /** Source preset's DB id — set when dragged images should be MOVED to the
-   * drop target's preset (not cloned). */
-  sourcePresetDbId?: string;
 }
 
 export default function ReferenceImageGrid({
@@ -30,9 +28,9 @@ export default function ReferenceImageGrid({
   onInspect,
   enableDelete = false,
   enableFavorite = false,
-  targetRowHeight = 260,
-  spacing = 12,
   sourcePresetDbId,
+  targetRowHeight = 240,
+  spacing = 12,
 }: Props) {
   return (
     <RowsPhotoAlbum
@@ -47,6 +45,9 @@ export default function ReferenceImageGrid({
       targetRowHeight={targetRowHeight}
       spacing={spacing}
       defaultContainerWidth={1100}
+      // Keep partial rows (last row, single image, etc.) at the SAME height
+      // as full rows so a 1-image page doesn't render full-width giant.
+      rowConstraints={{ singleRowMaxHeight: targetRowHeight }}
       render={{
         extras: (_, ctx) => {
           const item = (ctx.photo as unknown as { item: PresetReferenceImage })
@@ -54,9 +55,7 @@ export default function ReferenceImageGrid({
           const isSel = selectedUrls.has(item.url);
           return (
             <>
-              {/* Click overlay handles selection AND drag start. Sits
-                * below the overlay buttons (z-10) so heart/inspect/delete
-                * intercept clicks. */}
+              {/* Click overlay handles selection AND drag start. */}
               <div
                 className="absolute inset-0 cursor-pointer"
                 onClick={() => onToggleSelect(item.url)}
@@ -64,8 +63,6 @@ export default function ReferenceImageGrid({
                 role="button"
                 draggable
                 onDragStart={(e) => {
-                  // If the dragged image is part of the multi-selection,
-                  // drag the whole set. Otherwise drag just this one.
                   const dragSet =
                     isSel && selectedUrls.size > 0
                       ? items.filter((i) => selectedUrls.has(i.url))
@@ -77,9 +74,6 @@ export default function ReferenceImageGrid({
                     sourcePresetDbId: sourcePresetDbId ?? null,
                   });
                   e.dataTransfer.setData("text/uri-list", urls.join("\n"));
-                  // Backup channel: prefix-encoded move payload in text/plain.
-                  // Some browsers / Safari strip custom MIME types; we still
-                  // recover the move intent from this marker on drop.
                   e.dataTransfer.setData(
                     "text/plain",
                     `__sceneify-move__${movePayload}`,
@@ -88,13 +82,8 @@ export default function ReferenceImageGrid({
                     "application/x-sceneify-image-ids",
                     movePayload,
                   );
-                  // "copyMove" so the chip's dragover dropEffect ("copy")
-                  // doesn't mismatch and silently block the drop.
                   e.dataTransfer.effectAllowed = "copyMove";
 
-                  // Custom drag image — when dragging multiple, render a
-                  // small stack of thumbs with a count badge so the user
-                  // sees the whole selection moving, not just one image.
                   if (dragSet.length > 1) {
                     const stack = document.createElement("div");
                     stack.style.cssText =
@@ -113,8 +102,6 @@ export default function ReferenceImageGrid({
                     stack.appendChild(badge);
                     document.body.appendChild(stack);
                     e.dataTransfer.setDragImage(stack, 64, 64);
-                    // Browser captures the element synchronously after this
-                    // handler returns; remove on next tick.
                     window.setTimeout(() => stack.remove(), 0);
                   }
                 }}
@@ -123,10 +110,7 @@ export default function ReferenceImageGrid({
                 <span className="pointer-events-none absolute inset-0 rounded-[inherit] ring-2 ring-emerald-500 ring-offset-0" />
               )}
               {enableFavorite && (
-                <FavoriteButton
-                  imageId={item.id}
-                  initial={item.favorited}
-                />
+                <FavoriteButton imageId={item.id} initial={item.favorited} />
               )}
               {isSel && (
                 <span className="pointer-events-none absolute bottom-1.5 left-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
@@ -201,7 +185,7 @@ function FavoriteButton({
         e.preventDefault();
         e.stopPropagation();
         const next = !favorited;
-        setFavorited(next); // optimistic
+        setFavorited(next);
         try {
           const res = await fetch(
             `/api/admin/preset-images/${imageId}/favorite`,
@@ -214,7 +198,7 @@ function FavoriteButton({
           if (!res.ok) throw new Error(await res.text());
           startTransition(() => router.refresh());
         } catch (err) {
-          setFavorited(!next); // rollback
+          setFavorited(!next);
           alert(`Favorite failed: ${err instanceof Error ? err.message : err}`);
         }
       }}
