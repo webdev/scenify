@@ -339,10 +339,27 @@ export interface Preset {
   dbId: string;
   name: string;
   description: string;
+  mood: string;
+  category: string;
+  palette: string[];
+  displayOrder: number;
+  heroImageUrl: string | null;
   /** URL-only list (back-compat for callers that only need URLs). */
   referenceImageUrls: string[];
   /** Full reference info — needed for justified-rows masonry + admin actions. */
   referenceImages: PresetReferenceImage[];
+}
+
+/** Customer-card subset returned by /api/public/presets — no reference images. */
+export interface PublicPreset {
+  slug: string;
+  name: string;
+  description: string;
+  mood: string;
+  category: string;
+  palette: string[];
+  displayOrder: number;
+  heroImageUrl: string | null;
 }
 
 export interface DB {

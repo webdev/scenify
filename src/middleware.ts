@@ -8,6 +8,14 @@ export default auth((req) => {
   if (pathname.startsWith("/api/auth")) return NextResponse.next();
   if (pathname === "/admin/sign-in") return NextResponse.next();
 
+  // Internal service-to-service surface — gated by OIDC bearer in the route
+  // handler, not by NextAuth session.
+  if (pathname.startsWith("/api/internal/")) return NextResponse.next();
+
+  // Customer-facing read-only API — anonymous reads. Returns only data
+  // already shown to end users (preset cards), no reference image URLs.
+  if (pathname.startsWith("/api/public/")) return NextResponse.next();
+
   const session = req.auth;
   const isAdmin =
     session?.user &&

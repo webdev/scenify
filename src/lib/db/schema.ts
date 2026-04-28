@@ -14,6 +14,13 @@ export const preset = pgTable("preset", {
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
+  // Customer-facing presentation metadata — surfaced to anonymous /try
+  // pages via /api/public/presets. Reference images stay private.
+  mood: text("mood").notNull().default(""),
+  category: text("category").notNull().default(""),
+  palette: text("palette").array().notNull().default(sql`'{}'::text[]`),
+  displayOrder: integer("display_order").notNull().default(0),
+  heroImageUrl: text("hero_image_url"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .default(sql`NOW()`),
