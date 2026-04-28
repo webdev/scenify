@@ -872,6 +872,43 @@ export default function Dashboard({
                   >
                     select all
                   </button>
+                  {activePreset.referenceImages.length === 0 && (
+                    <button
+                      onClick={async () => {
+                        if (
+                          !confirm(
+                            `Delete preset "${activePreset.name}"? It's empty so no images are lost.`,
+                          )
+                        )
+                          return;
+                        try {
+                          const res = await fetch(
+                            `/api/admin/presets/${activePreset.dbId}`,
+                            { method: "DELETE" },
+                          );
+                          if (!res.ok) throw new Error(await res.text());
+                          // Pick a sibling preset to view if any remain.
+                          const remaining = presets.filter(
+                            (p) => p.id !== activePreset.id,
+                          );
+                          if (remaining[0]) setPresetId(remaining[0].id);
+                          setDropToast(
+                            `Deleted preset "${activePreset.name}"`,
+                          );
+                          window.setTimeout(() => setDropToast(null), 2500);
+                          router.refresh();
+                        } catch (err) {
+                          alert(
+                            `Delete failed: ${err instanceof Error ? err.message : err}`,
+                          );
+                        }
+                      }}
+                      className="rounded bg-rose-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white hover:bg-rose-500"
+                      title="Delete this empty preset"
+                    >
+                      Delete preset
+                    </button>
+                  )}
                 </div>
               </div>
               {activePreset.referenceImages.length === 0 ? (
