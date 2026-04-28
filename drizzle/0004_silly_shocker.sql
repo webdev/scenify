@@ -1,0 +1,1 @@
+ALTER TABLE "preset_image" ADD COLUMN "favorited" boolean DEFAULT false NOT NULL;

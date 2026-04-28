@@ -9,6 +9,7 @@ const MODEL_ENDPOINTS: Record<ImageModelId, string> = {
   "gpt-image-2": "openai/gpt-image-2/edit",
   "nano-banana-2": "fal-ai/nano-banana/edit",
   "flux-kontext": "fal-ai/flux-pro/kontext",
+  "flux-2": "fal-ai/flux-2/edit",
 };
 
 export type FalProgressEvent =
@@ -30,6 +31,9 @@ export interface GenerateImageOutput {
   imageUrl: string;
   contentType: string;
   raw: unknown;
+  endpoint: string;
+  requestId?: string;
+  input: Record<string, unknown>;
 }
 
 interface FalImageResult {
@@ -47,6 +51,8 @@ const FALLBACK_CHAIN: Record<ImageModelId, ImageModelId[]> = {
   "gpt-image-2": ["gpt-image-2", "nano-banana-2", "flux-kontext"],
   "nano-banana-2": ["nano-banana-2", "flux-kontext"],
   "flux-kontext": ["flux-kontext"],
+  // flux-2 is its own pipeline — no auto-fallback; user picked it explicitly.
+  "flux-2": ["flux-2"],
 };
 
 const SIZE_TO_ASPECT_RATIO: Record<ImageSize, string> = {
@@ -55,6 +61,20 @@ const SIZE_TO_ASPECT_RATIO: Record<ImageSize, string> = {
   "1536x1024": "3:2",
   auto: "1:1",
 };
+
+function gptImage2SizeEnum(size: ImageSize): string {
+  switch (size) {
+    case "1024x1024":
+      return "square_hd";
+    case "1024x1536":
+      return "portrait_4_3";
+    case "1536x1024":
+      return "landscape_4_3";
+    case "auto":
+    default:
+      return "auto";
+  }
+}
 
 function buildModelInput(
   model: ImageModelId,
@@ -66,7 +86,8 @@ function buildModelInput(
     return {
       prompt: input.prompt,
       image_urls: input.referenceImageUrls,
-      image_size: input.size ?? "auto",
+      // fal's gpt-image-2/edit takes an enum, not a "WxH" string.
+      image_size: gptImage2SizeEnum(input.size ?? "auto"),
       quality: input.quality ?? "high",
       num_images: 1,
       ...(typeof input.seed === "number" ? { seed: input.seed } : {}),
@@ -82,13 +103,25 @@ function buildModelInput(
     };
   }
 
-  // flux-kontext takes a SINGLE image_url and aspect_ratio + safety_tolerance.
+  if (model === "flux-kontext") {
+    // flux-kontext takes a SINGLE image_url and aspect_ratio + safety_tolerance.
+    return {
+      prompt: input.prompt,
+      image_url: input.referenceImageUrls[0],
+      aspect_ratio: aspectRatio,
+      num_images: 1,
+      safety_tolerance: "6",
+      output_format: "png",
+      ...(typeof input.seed === "number" ? { seed: input.seed } : {}),
+    };
+  }
+
+  // flux-2/edit: image_urls (plural) + aspect_ratio + seed.
   return {
     prompt: input.prompt,
-    image_url: input.referenceImageUrls[0],
+    image_urls: input.referenceImageUrls,
     aspect_ratio: aspectRatio,
     num_images: 1,
-    safety_tolerance: "6",
     output_format: "png",
     ...(typeof input.seed === "number" ? { seed: input.seed } : {}),
   };
@@ -120,11 +153,12 @@ async function generateOnce(
   input: GenerateImageInput,
 ): Promise<GenerateImageOutput> {
   const endpoint = MODEL_ENDPOINTS[model];
+  const builtInput = buildModelInput(model, input);
   const { onProgress } = input;
   let lastLogCount = 0;
 
   const result = await fal.subscribe(endpoint, {
-    input: buildModelInput(model, input),
+    input: builtInput,
     logs: true,
     onQueueUpdate: (update: FalQueueUpdate) => {
       if (!onProgress) return;
@@ -158,6 +192,9 @@ async function generateOnce(
     imageUrl: first.url,
     contentType: first.content_type ?? "image/png",
     raw: result.data,
+    endpoint,
+    requestId: (result as { requestId?: string }).requestId,
+    input: builtInput,
   };
 }
 

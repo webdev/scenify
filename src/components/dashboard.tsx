@@ -1,15 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type {
   Generation,
   ImageModelId,
   ImageQuality,
   Preset,
+  RegisterId,
   Source,
   SizeProfileId,
 } from "@/lib/types";
-import { SIZE_PROFILES } from "@/lib/types";
+import { REGISTERS, SIZE_PROFILES } from "@/lib/types";
+import type { PackPlatform } from "@/lib/listing-packs";
+import ReferenceImageGrid from "@/components/reference-image-grid";
 import type {
   GenerationPhase,
   StreamEvent,
@@ -45,8 +49,10 @@ const PHASE_LABEL: Record<ProgressPhase, string> = {
 };
 
 interface TestProduct {
-  filename: string;
+  id: string;
   url: string;
+  filename: string;
+  collection: string;
 }
 
 interface Props {
@@ -54,6 +60,9 @@ interface Props {
   initialGenerations: Generation[];
   presets: Preset[];
 }
+
+const REFS_PER_PAGE = 40;
+const TEST_PRODUCTS_PER_PAGE = 40;
 
 const MODELS: { id: ImageModelId; label: string }[] = [
   {
@@ -67,6 +76,10 @@ const MODELS: { id: ImageModelId; label: string }[] = [
   {
     id: "flux-kontext",
     label: "FLUX Kontext (BFL) — most permissive",
+  },
+  {
+    id: "flux-2",
+    label: "FLUX 2 (BFL) — fast, multi-reference, separate pipeline",
   },
 ];
 
@@ -84,6 +97,14 @@ export default function Dashboard({
   const [quality, setQuality] = useState<ImageQuality>("low");
   const [sizeProfile, setSizeProfile] =
     useState<SizeProfileId>("square-1024");
+  const [register, setRegister] = useState<RegisterId>("catalog-dtc");
+  const [packPlatform, setPackPlatform] = useState<PackPlatform>("amazon");
+  const [refsPage, setRefsPage] = useState(0);
+  const [testProductsPage, setTestProductsPage] = useState(0);
+  const [dropTargetPresetId, setDropTargetPresetId] = useState<string | null>(
+    null,
+  );
+  const [dropToast, setDropToast] = useState<string | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(
@@ -220,19 +241,26 @@ export default function Dashboard({
     [setProgressFor],
   );
 
+  const reloadTestProducts = useCallback(async () => {
+    try {
+      const r = await fetch("/api/test-products", { cache: "no-store" });
+      const j = await r.json();
+      setTestProducts(j.products ?? []);
+    } catch {
+      setTestProducts([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (testProducts !== null || !showTestProducts) return;
-    fetch("/api/test-products")
-      .then((r) => r.json())
-      .then((j) => setTestProducts(j.products ?? []))
-      .catch(() => setTestProducts([]));
-  }, [showTestProducts, testProducts]);
+    void reloadTestProducts();
+  }, [showTestProducts, testProducts, reloadTestProducts]);
 
-  const toggleTestProduct = useCallback((filename: string) => {
+  const toggleTestProduct = useCallback((id: string) => {
     setSelectedTestProducts((prev) => {
       const next = new Set(prev);
-      if (next.has(filename)) next.delete(filename);
-      else next.add(filename);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }, []);
@@ -266,6 +294,7 @@ export default function Dashboard({
       for (const u of prev) if (allowed.has(u)) next.add(u);
       return next;
     });
+    setRefsPage(0);
   }, [activePreset]);
 
   const refresh = useCallback(async () => {
@@ -305,6 +334,12 @@ export default function Dashboard({
         sizeProfile?: SizeProfileId;
         reusePromptFromGenerationId?: string;
         seed?: number;
+        register?: RegisterId;
+        packId?: string;
+        packPlatform?: PackPlatform;
+        packRole?: string;
+        packShotIndex?: number;
+        shotFraming?: string;
       },
     ) => {
       const tempKey = `${sourceId}:${Date.now()}:${Math.random()}`;
@@ -325,7 +360,13 @@ export default function Dashboard({
             quality: overrides?.quality ?? quality,
             sizeProfile: overrides?.sizeProfile ?? sizeProfile,
             seed: overrides?.seed,
+            register: overrides?.register ?? register,
             reusePromptFromGenerationId: overrides?.reusePromptFromGenerationId,
+            packId: overrides?.packId,
+            packPlatform: overrides?.packPlatform,
+            packRole: overrides?.packRole,
+            packShotIndex: overrides?.packShotIndex,
+            shotFraming: overrides?.shotFraming,
           }),
         });
         if (!res.body) throw new Error("no response body");
@@ -372,7 +413,7 @@ export default function Dashboard({
         });
       }
     },
-    [presetId, model, quality, sizeProfile, applyStreamEvent],
+    [presetId, model, quality, sizeProfile, register, applyStreamEvent],
   );
 
   const onRegenerateNewSeed = useCallback(
@@ -387,24 +428,125 @@ export default function Dashboard({
     [runGeneration],
   );
 
+  const onGeneratePackForSource = useCallback(
+    async (sourceId: string) => {
+      if (!presetId) return;
+      try {
+        const res = await fetch("/api/listing-packs", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sourceId,
+            presetId,
+            platform: packPlatform,
+            model,
+            quality,
+            register,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+        const plan = json as {
+          packId: string;
+          platform: PackPlatform;
+          seed: number;
+          shots: Array<{
+            packId: string;
+            packPlatform: PackPlatform;
+            packRole: string;
+            packShotIndex: number;
+            shotFraming: string;
+            sizeProfile: string;
+            seed: number;
+            label: string;
+          }>;
+        };
+        // Fire all shots in parallel. Each one runs its own constructPrompt
+        // (the shotFraming overrides the framing block) and renders.
+        await Promise.all(
+          plan.shots.map((shot) =>
+            runGeneration(sourceId, [], {
+              quality,
+              sizeProfile: shot.sizeProfile as SizeProfileId,
+              seed: shot.seed,
+              register,
+              packId: shot.packId,
+              packPlatform: shot.packPlatform,
+              packRole: shot.packRole,
+              packShotIndex: shot.packShotIndex,
+              shotFraming: shot.shotFraming,
+            }),
+          ),
+        );
+        await refresh();
+      } catch (err) {
+        console.error("pack generation failed:", err);
+        alert(
+          `Pack generation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+    [presetId, packPlatform, model, quality, register, runGeneration, refresh],
+  );
+
+  const router = useRouter();
+  const onAddImageToPreset = useCallback(
+    async (presetDbId: string, presetName: string, imageUrl: string) => {
+      try {
+        const res = await fetch(
+          `/api/admin/presets/${presetDbId}/images`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sourceUrl: imageUrl }),
+          },
+        );
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+        setDropToast(`Added to ${presetName}`);
+        window.setTimeout(() => setDropToast(null), 2500);
+        router.refresh();
+      } catch (err) {
+        alert(
+          `Couldn't add to preset: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    },
+    [router],
+  );
+
+  const onRetry = useCallback(
+    async (gen: Generation) => {
+      // Re-run with the SAME source and prompt (no Claude pass) and a NEW
+      // seed so we don't immediately hit the same fal failure pattern. Used
+      // to recover failed rows without losing the prompt work.
+      await runGeneration(gen.sourceId, [], {
+        quality: gen.quality,
+        sizeProfile: gen.sizeProfile,
+        reusePromptFromGenerationId: gen.id,
+      });
+    },
+    [runGeneration],
+  );
+
   const onGenerateBatch = useCallback(async () => {
     if (!presetId) return;
     const refs = Array.from(selectedRefs);
     if (refs.length === 0) return;
 
     const importedFromTest = await Promise.all(
-      Array.from(selectedTestProducts).map(async (filename) => {
+      Array.from(selectedTestProducts).map(async (id) => {
         try {
           const res = await fetch("/api/sources", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ testProductFilename: filename }),
+            body: JSON.stringify({ testProductId: id }),
           });
           const json = await res.json();
           if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
           return json.source as Source;
         } catch (err) {
-          console.error(`failed to import ${filename}:`, err);
+          console.error(`failed to import test product ${id}:`, err);
           return null;
         }
       }),
@@ -440,16 +582,15 @@ export default function Dashboard({
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-10">
-      <header className="mb-10 flex items-end justify-between gap-6 border-b border-zinc-200 pb-6 dark:border-zinc-800">
+      <header className="mb-8 flex items-end justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Sceneify</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Generate</h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Upload a flat product photo. Pick a preset. Generate a premium
-            lifestyle image with the same garment.
+            Upload or pick a product photo, choose a preset, generate.
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1 text-xs text-zinc-500">
-          <span>{sources.length} sources · {generations.length} generations</span>
+        <div className="text-xs text-zinc-500">
+          {sources.length} sources · {generations.length} generations
         </div>
       </header>
 
@@ -458,35 +599,199 @@ export default function Dashboard({
           <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
             Preset
           </label>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="sticky top-0 z-40 -mx-6 mt-3 flex gap-3 overflow-x-auto bg-white/95 px-6 pb-3 pt-3 backdrop-blur dark:bg-zinc-900/95">
+            <button
+              type="button"
+              onClick={async () => {
+                const name = window.prompt("New preset name:");
+                if (!name) return;
+                try {
+                  const res = await fetch("/api/admin/presets", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ name }),
+                  });
+                  const json = await res.json();
+                  if (!res.ok)
+                    throw new Error(json?.error ?? `HTTP ${res.status}`);
+                  router.refresh();
+                } catch (err) {
+                  alert(
+                    `Couldn't create: ${err instanceof Error ? err.message : err}`,
+                  );
+                }
+              }}
+              className="flex shrink-0 flex-col items-center justify-center rounded-lg border-2 border-dashed border-zinc-300 bg-zinc-50/50 text-xs text-zinc-500 transition hover:border-emerald-500 hover:bg-emerald-50/50 hover:text-emerald-700 dark:border-zinc-700 dark:bg-zinc-900/50 dark:hover:border-emerald-400 dark:hover:bg-emerald-950/30 dark:hover:text-emerald-300"
+              style={{ width: 144, height: 198 }}
+              title="Create a new preset"
+            >
+              <span className="text-2xl">+</span>
+              <span className="mt-1 font-medium">New preset</span>
+            </button>
             {presets.map((p) => {
               const isActive = p.id === presetId;
+              const previewUrl = p.referenceImageUrls[0];
+              const isDropTarget = dropTargetPresetId === p.dbId;
               return (
                 <button
                   key={p.id}
                   onClick={() => setPresetId(p.id)}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    setDropTargetPresetId(p.dbId);
+                  }}
+                  onDragOver={(e) => {
+                    // Always preventDefault so the browser permits the drop.
+                    // Data MIME types are sometimes hidden during dragover
+                    // for cross-origin security; we inspect them at drop.
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "copy";
+                    if (dropTargetPresetId !== p.dbId)
+                      setDropTargetPresetId(p.dbId);
+                  }}
+                  onDragLeave={() => {
+                    if (dropTargetPresetId === p.dbId)
+                      setDropTargetPresetId(null);
+                  }}
+                  onDrop={async (e) => {
+                    e.preventDefault();
+                    setDropTargetPresetId(null);
+                    console.log(
+                      "[drop] target preset:",
+                      p.dbId,
+                      p.name,
+                      "types:",
+                      Array.from(e.dataTransfer.types),
+                    );
+                    // Move flow: dragged from another preset's reference grid.
+                    // Try the custom MIME first; if missing (Safari strips
+                    // some custom MIMEs), fall back to the prefix-encoded
+                    // payload smuggled through text/plain.
+                    let moveData = e.dataTransfer.getData(
+                      "application/x-sceneify-image-ids",
+                    );
+                    if (!moveData) {
+                      const plain = e.dataTransfer.getData("text/plain");
+                      if (plain.startsWith("__sceneify-move__")) {
+                        moveData = plain.slice("__sceneify-move__".length);
+                      }
+                    }
+                    console.log("[drop] moveData:", moveData);
+                    if (moveData) {
+                      try {
+                        const parsed = JSON.parse(moveData) as {
+                          ids: string[];
+                          sourcePresetDbId: string | null;
+                        };
+                        console.log(
+                          "[drop] parsed move:",
+                          parsed,
+                          "same preset?",
+                          parsed.sourcePresetDbId === p.dbId,
+                        );
+                        if (parsed.sourcePresetDbId === p.dbId) {
+                          setDropToast(
+                            "Already in this preset — pick a different one",
+                          );
+                          window.setTimeout(() => setDropToast(null), 2000);
+                          return;
+                        }
+                        const res = await fetch(
+                          "/api/admin/preset-images/move",
+                          {
+                            method: "POST",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({
+                              imageIds: parsed.ids,
+                              targetPresetId: p.dbId,
+                            }),
+                          },
+                        );
+                        const json = await res.json();
+                        console.log(
+                          "[drop] move response:",
+                          res.status,
+                          json,
+                        );
+                        if (!res.ok)
+                          throw new Error(json?.error ?? `HTTP ${res.status}`);
+                        setDropToast(
+                          `Moved ${parsed.ids.length} ${
+                            parsed.ids.length === 1 ? "image" : "images"
+                          } to ${p.name}`,
+                        );
+                        window.setTimeout(() => setDropToast(null), 2500);
+                        router.refresh();
+                      } catch (err) {
+                        alert(
+                          `Move failed: ${err instanceof Error ? err.message : err}`,
+                        );
+                      }
+                      return;
+                    }
+                    // Clone flow: dragged from a generation card (or any URL).
+                    // Handles multi-line uri-list by cloning each. Skip
+                    // text/plain if it carries the move sentinel.
+                    const uriList = e.dataTransfer.getData("text/uri-list");
+                    const plainText = e.dataTransfer.getData("text/plain");
+                    const raw =
+                      uriList ||
+                      (plainText.startsWith("__sceneify-move__")
+                        ? ""
+                        : plainText);
+                    if (!raw) return;
+                    const urls = raw
+                      .split(/[\r\n]+/)
+                      .map((u) => u.trim())
+                      .filter((u) => u && !u.startsWith("#"));
+                    for (const url of urls) {
+                      await onAddImageToPreset(p.dbId, p.name, url);
+                    }
+                  }}
                   type="button"
                   aria-pressed={isActive}
-                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition ${
-                    isActive
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-900 dark:border-emerald-400 dark:bg-emerald-950/40 dark:text-emerald-100"
-                      : "border-zinc-300 bg-white hover:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-500"
+                  className={`group relative shrink-0 overflow-hidden rounded-lg border-2 text-left transition ${
+                    isDropTarget
+                      ? "border-violet-500 ring-2 ring-violet-500/40"
+                      : isActive
+                        ? "border-emerald-500 ring-2 ring-emerald-500/30"
+                        : "border-zinc-200 hover:border-zinc-500 dark:border-zinc-800 dark:hover:border-zinc-500"
                   }`}
+                  style={{ width: 144 }}
                 >
-                  {isActive && (
-                    <svg
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
-                      aria-hidden="true"
-                    >
-                      <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7 7a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06L6.25 10.69l6.47-6.47a.75.75 0 0 1 1.06 0z" />
-                    </svg>
-                  )}
-                  <span className="font-medium">{p.name}</span>
-                  <span className="text-[11px] text-zinc-500">
-                    · {p.referenceImageUrls.length}
-                  </span>
+                  <div className="relative aspect-square w-full bg-zinc-100 dark:bg-zinc-950">
+                    {previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={previewUrl}
+                        alt=""
+                        loading="lazy"
+                        className="h-full w-full object-cover transition group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-[10px] text-zinc-500">
+                        no thumb
+                      </div>
+                    )}
+                    {isActive && (
+                      <span className="absolute right-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
+                        <svg
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                          className="h-3 w-3"
+                          aria-hidden="true"
+                        >
+                          <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7 7a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06L6.25 10.69l6.47-6.47a.75.75 0 0 1 1.06 0z" />
+                        </svg>
+                      </span>
+                    )}
+                  </div>
+                  <div className="px-2 py-1.5">
+                    <div className="truncate text-xs font-medium">{p.name}</div>
+                    <div className="text-[10px] text-zinc-500">
+                      {p.referenceImageUrls.length} ref
+                    </div>
+                  </div>
                 </button>
               );
             })}
@@ -498,7 +803,7 @@ export default function Dashboard({
                   {activePreset.name} — Reference images
                 </div>
                 <div className="flex items-center gap-3 text-[11px] text-zinc-500">
-                  <span>{activePreset.referenceImageUrls.length} total</span>
+                  <span>{activePreset.referenceImages.length} total</span>
                   <span className="font-medium text-emerald-700 dark:text-emerald-400">
                     {selectedRefs.size} selected
                   </span>
@@ -522,76 +827,158 @@ export default function Dashboard({
                   </button>
                 </div>
               </div>
-              {activePreset.referenceImageUrls.length === 0 ? (
+              {activePreset.referenceImages.length === 0 ? (
                 <div className="rounded border border-dashed border-zinc-300 p-6 text-center text-xs text-zinc-500 dark:border-zinc-700">
-                  No images. Drop them in{" "}
-                  <code className="font-mono">
-                    public/presets/{activePreset.id}/
-                  </code>
+                  No images yet for this preset. Add some in{" "}
+                  <a
+                    href={`/admin/presets/${activePreset.id}`}
+                    className="underline underline-offset-2"
+                  >
+                    /admin/presets/{activePreset.id}
+                  </a>
+                  .
                 </div>
               ) : (
-                <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8">
-                  {activePreset.referenceImageUrls.map((u) => {
-                    const isSel = selectedRefs.has(u);
+                <>
+                  {(() => {
+                    const favorites = activePreset.referenceImages.filter(
+                      (r) => r.favorited,
+                    );
+                    if (favorites.length === 0) return null;
                     return (
-                      <div
-                        key={u}
-                        className={`group relative aspect-square overflow-hidden rounded border-2 transition ${
-                          isSel
-                            ? "border-emerald-500 ring-2 ring-emerald-500/40"
-                            : "border-zinc-200 hover:border-zinc-500 dark:border-zinc-800 dark:hover:border-zinc-500"
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => toggleRef(u)}
-                          aria-pressed={isSel}
-                          title={u.split("/").pop()}
-                          className="absolute inset-0 h-full w-full"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={u}
-                            alt=""
-                            loading="lazy"
-                            className="h-full w-full object-cover transition group-hover:scale-105"
-                          />
-                        </button>
-                        {isSel && (
-                          <span className="pointer-events-none absolute left-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
+                      <div className="mb-4 rounded-md border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
+                        <div className="mb-2 flex items-center justify-between text-[11px]">
+                          <div className="flex items-center gap-1.5 font-medium uppercase tracking-wide text-rose-700 dark:text-rose-300">
                             <svg
-                              viewBox="0 0 16 16"
+                              viewBox="0 0 24 24"
                               fill="currentColor"
-                              className="h-3 w-3"
+                              className="h-3.5 w-3.5"
                               aria-hidden="true"
                             >
-                              <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7 7a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06L6.25 10.69l6.47-6.47a.75.75 0 0 1 1.06 0z" />
+                              <path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6.5 5.5 5.5 0 0 1 21.5 12c-2.5 4.5-9.5 9-9.5 9z" />
                             </svg>
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setInspectImage(u);
-                          }}
-                          aria-label="View image prompt"
-                          title="View image prompt"
-                          className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/85 text-zinc-700 opacity-0 shadow transition group-hover:opacity-100 hover:bg-white dark:bg-zinc-900/80 dark:text-zinc-200 dark:hover:bg-zinc-900"
-                        >
-                          <svg
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                            className="h-3.5 w-3.5"
-                            aria-hidden="true"
+                            Favorites · {favorites.length}
+                          </div>
+                          <button
+                            onClick={() =>
+                              setSelectedRefs(
+                                new Set(favorites.map((f) => f.url)),
+                              )
+                            }
+                            className="text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
                           >
-                            <path d="M8 3a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-1.25 3.5h2v6h-2v-6z" />
-                          </svg>
-                        </button>
+                            select all favorites
+                          </button>
+                        </div>
+                        <div className="flex gap-2 overflow-x-auto pb-1">
+                          {favorites.map((f) => {
+                            const isSel = selectedRefs.has(f.url);
+                            return (
+                              <button
+                                key={f.id}
+                                type="button"
+                                onClick={() => toggleRef(f.url)}
+                                title={f.filename}
+                                className={`relative shrink-0 overflow-hidden rounded-md border-2 transition ${
+                                  isSel
+                                    ? "border-emerald-500 ring-2 ring-emerald-500/40"
+                                    : "border-zinc-200 hover:border-zinc-500 dark:border-zinc-800 dark:hover:border-zinc-500"
+                                }`}
+                                style={{ width: 88, height: 88 }}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={f.url}
+                                  alt=""
+                                  loading="lazy"
+                                  className="h-full w-full object-cover"
+                                />
+                                {isSel && (
+                                  <span className="pointer-events-none absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
+                                    <svg
+                                      viewBox="0 0 16 16"
+                                      fill="currentColor"
+                                      className="h-2.5 w-2.5"
+                                      aria-hidden="true"
+                                    >
+                                      <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7 7a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06L6.25 10.69l6.47-6.47a.75.75 0 0 1 1.06 0z" />
+                                    </svg>
+                                  </span>
+                                )}
+                                <span
+                                  role="button"
+                                  aria-label="Unfavorite"
+                                  title="Unfavorite"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    try {
+                                      const res = await fetch(
+                                        `/api/admin/preset-images/${f.id}/favorite`,
+                                        {
+                                          method: "POST",
+                                          headers: {
+                                            "content-type": "application/json",
+                                          },
+                                          body: JSON.stringify({
+                                            favorited: false,
+                                          }),
+                                        },
+                                      );
+                                      if (!res.ok)
+                                        throw new Error(await res.text());
+                                      router.refresh();
+                                    } catch (err) {
+                                      alert(
+                                        `Unfavorite failed: ${err instanceof Error ? err.message : err}`,
+                                      );
+                                    }
+                                  }}
+                                  className="absolute bottom-1 left-1 inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-rose-500 text-white shadow"
+                                >
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    fill="currentColor"
+                                    className="h-3 w-3"
+                                    aria-hidden="true"
+                                  >
+                                    <path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6.5 5.5 5.5 0 0 1 21.5 12c-2.5 4.5-9.5 9-9.5 9z" />
+                                  </svg>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
-                  })}
-                </div>
+                  })()}
+                  <Pagination
+                    page={refsPage}
+                    pageSize={REFS_PER_PAGE}
+                    total={activePreset.referenceImages.length}
+                    onPageChange={setRefsPage}
+                  />
+                  <div className="mt-3">
+                    <ReferenceImageGrid
+                      items={activePreset.referenceImages.slice(
+                        refsPage * REFS_PER_PAGE,
+                        (refsPage + 1) * REFS_PER_PAGE,
+                      )}
+                      selectedUrls={selectedRefs}
+                      onToggleSelect={toggleRef}
+                      onInspect={setInspectImage}
+                      enableFavorite
+                      enableDelete
+                      sourcePresetDbId={activePreset.dbId}
+                    />
+                  </div>
+                  <Pagination
+                    page={refsPage}
+                    pageSize={REFS_PER_PAGE}
+                    total={activePreset.referenceImages.length}
+                    onPageChange={setRefsPage}
+                  />
+                </>
               )}
             </div>
           )}
@@ -628,6 +1015,23 @@ export default function Dashboard({
               <option value="medium">Standard · medium (~$0.04)</option>
               <option value="high">Final · high (~$0.17)</option>
               <option value="auto">Auto</option>
+            </select>
+          </div>
+
+          <div className="min-w-[260px]">
+            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Register
+            </label>
+            <select
+              value={register}
+              onChange={(e) => setRegister(e.target.value as RegisterId)}
+              className="mt-2 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            >
+              {REGISTERS.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label} — {r.hint}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -727,6 +1131,82 @@ export default function Dashboard({
           </div>
         </div>
 
+        <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <div className="min-w-[220px]">
+            <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Listing pack
+            </label>
+            <select
+              value={packPlatform}
+              onChange={(e) => setPackPlatform(e.target.value as PackPlatform)}
+              className="mt-2 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            >
+              <option value="amazon">Amazon — 6 shots</option>
+              <option value="shopify">Shopify — 4 shots</option>
+              <option value="instagram">Instagram — 4 carousel</option>
+              <option value="tiktok">TikTok — 3 vertical</option>
+            </select>
+          </div>
+          <p className="max-w-md text-[11px] text-zinc-500">
+            One source → a full marketplace shot list with locked seed across
+            shots so it&apos;s the same model in the same scene. Hero,
+            three-quarter, profile, full body, detail crops — auto-framed.
+          </p>
+          <button
+            onClick={async () => {
+              // Same flow as onGenerateBatch: import any selected test
+              // products into Sources first, then run a pack per source.
+              const importedFromTest = await Promise.all(
+                Array.from(selectedTestProducts).map(async (id) => {
+                  try {
+                    const res = await fetch("/api/sources", {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ testProductId: id }),
+                    });
+                    const json = await res.json();
+                    if (!res.ok)
+                      throw new Error(json?.error ?? `HTTP ${res.status}`);
+                    return json.source as Source;
+                  } catch (err) {
+                    console.error(`failed to import ${id}:`, err);
+                    return null;
+                  }
+                }),
+              );
+              const newSources = importedFromTest.filter(
+                (s): s is Source => !!s,
+              );
+              if (newSources.length > 0) {
+                setSources((prev) => [...newSources, ...prev]);
+              }
+              const sourceIds = [
+                ...Array.from(selectedSourceIds),
+                ...newSources.map((s) => s.id),
+              ];
+              if (sourceIds.length === 0) {
+                alert(
+                  "Pick at least one source (uploaded or test product).",
+                );
+                return;
+              }
+              setSelectedTestProducts(new Set());
+              for (const id of sourceIds) {
+                await onGeneratePackForSource(id);
+              }
+            }}
+            disabled={
+              !presetId ||
+              selectedSourceIds.size + selectedTestProducts.size === 0 ||
+              pending.size > 0
+            }
+            className="ml-auto rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 disabled:opacity-40 disabled:hover:bg-violet-600"
+            title="Generate the full listing pack for each selected source / test product"
+          >
+            Generate pack
+          </button>
+        </div>
+
         {showTestProducts && (
           <div className="mt-5 rounded-lg border border-zinc-200 bg-zinc-50/60 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
@@ -751,7 +1231,7 @@ export default function Dashboard({
                   <button
                     onClick={() =>
                       setSelectedTestProducts(
-                        new Set(testProducts.map((p) => p.filename)),
+                        new Set(testProducts.map((p) => p.id)),
                       )
                     }
                     className="underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -759,6 +1239,13 @@ export default function Dashboard({
                     select all
                   </button>
                 )}
+                <button
+                  onClick={reloadTestProducts}
+                  className="underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  title="Reload from DB"
+                >
+                  refresh
+                </button>
               </div>
             </div>
             {testProducts === null ? (
@@ -767,21 +1254,42 @@ export default function Dashboard({
               </div>
             ) : testProducts.length === 0 ? (
               <div className="rounded border border-dashed border-zinc-300 p-6 text-center text-xs text-zinc-500 dark:border-zinc-700">
-                No images. Drop them in{" "}
-                <code className="font-mono">test-sources/</code> at the repo
-                root.
+                No test products in the DB yet. Run{" "}
+                <code className="font-mono">pnpm db:migrate-test-products</code>
+                {" "}to import from the local{" "}
+                <code className="font-mono">test-sources/</code> directory.
               </div>
-            ) : (
-              <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8">
-                {testProducts.map((p) => {
-                  const isSel = selectedTestProducts.has(p.filename);
+            ) : (() => {
+              const totalPages = Math.max(
+                1,
+                Math.ceil(testProducts.length / TEST_PRODUCTS_PER_PAGE),
+              );
+              const safePage = Math.min(testProductsPage, totalPages - 1);
+              const paged = testProducts.slice(
+                safePage * TEST_PRODUCTS_PER_PAGE,
+                (safePage + 1) * TEST_PRODUCTS_PER_PAGE,
+              );
+              return (
+                <>
+                  <Pagination
+                    page={safePage}
+                    pageSize={TEST_PRODUCTS_PER_PAGE}
+                    total={testProducts.length}
+                    onPageChange={setTestProductsPage}
+                  />
+                  <div className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+                {paged.map((p) => {
+                  const isSel = selectedTestProducts.has(p.id);
+                  const label = p.collection
+                    ? `${p.collection}/${p.filename}`
+                    : p.filename;
                   return (
                     <button
-                      key={p.filename}
+                      key={p.id}
                       type="button"
-                      onClick={() => toggleTestProduct(p.filename)}
+                      onClick={() => toggleTestProduct(p.id)}
                       aria-pressed={isSel}
-                      title={p.filename}
+                      title={label}
                       className={`group relative aspect-square overflow-hidden rounded border-2 transition ${
                         isSel
                           ? "border-emerald-500 ring-2 ring-emerald-500/40"
@@ -810,8 +1318,16 @@ export default function Dashboard({
                     </button>
                   );
                 })}
-              </div>
-            )}
+                  </div>
+                  <Pagination
+                    page={safePage}
+                    pageSize={TEST_PRODUCTS_PER_PAGE}
+                    total={testProducts.length}
+                    onPageChange={setTestProductsPage}
+                  />
+                </>
+              );
+            })()}
           </div>
         )}
       </section>
@@ -897,17 +1413,13 @@ export default function Dashboard({
                         No generations yet for this source.
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        {sourceGens.map((g) => (
-                          <GenerationCard
-                            key={g.id}
-                            gen={g}
-                            preset={presets.find((p) => p.id === g.presetId)}
-                            progress={progress.get(g.id) ?? null}
-                            onRegenerateNewSeed={onRegenerateNewSeed}
-                          />
-                        ))}
-                      </div>
+                      <SourceGenerations
+                        gens={sourceGens}
+                        presets={presets}
+                        progress={progress}
+                        onRegenerateNewSeed={onRegenerateNewSeed}
+                        onRetry={onRetry}
+                      />
                     )}
                   </div>
                 </div>
@@ -917,6 +1429,11 @@ export default function Dashboard({
         </div>
       )}
 
+      {dropToast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-lg">
+          {dropToast}
+        </div>
+      )}
       {inspectImage && (
         <ReferenceImageModal
           imageUrl={inspectImage}
@@ -1065,18 +1582,122 @@ function ReferenceImageModal({
   );
 }
 
+function SourceGenerations({
+  gens,
+  presets,
+  progress,
+  onRegenerateNewSeed,
+  onRetry,
+}: {
+  gens: Generation[];
+  presets: Preset[];
+  progress: Map<string, ProgressState>;
+  onRegenerateNewSeed: (gen: Generation) => void;
+  onRetry: (gen: Generation) => void;
+}) {
+  // Group by packId. Standalones (no packId) end up in `singletons`.
+  const packs = new Map<string, Generation[]>();
+  const singletons: Generation[] = [];
+  for (const g of gens) {
+    if (g.packId) {
+      const arr = packs.get(g.packId) ?? [];
+      arr.push(g);
+      packs.set(g.packId, arr);
+    } else {
+      singletons.push(g);
+    }
+  }
+  const packEntries = Array.from(packs.entries()).map(([packId, items]) => {
+    const sorted = [...items].sort(
+      (a, b) => (a.packShotIndex ?? 0) - (b.packShotIndex ?? 0),
+    );
+    return { packId, items: sorted };
+  });
+  // Sort packs by their newest generation's createdAt desc.
+  packEntries.sort((a, b) => {
+    const ta = Math.max(
+      ...a.items.map((g) => new Date(g.createdAt).getTime()),
+    );
+    const tb = Math.max(
+      ...b.items.map((g) => new Date(g.createdAt).getTime()),
+    );
+    return tb - ta;
+  });
+
+  return (
+    <div className="space-y-5">
+      {packEntries.map(({ packId, items }) => {
+        const platform = items[0]?.packPlatform ?? "pack";
+        const seed = items[0]?.seed;
+        return (
+          <div
+            key={packId}
+            className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/60 dark:bg-violet-950/20"
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                <span>{platform} pack</span>
+                <span className="text-zinc-400">·</span>
+                <span>{items.length} shots</span>
+                {typeof seed === "number" && (
+                  <>
+                    <span className="text-zinc-400">·</span>
+                    <span className="font-mono normal-case text-zinc-500">
+                      seed {seed}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {items.map((g) => (
+                <GenerationCard
+                  key={g.id}
+                  gen={g}
+                  preset={presets.find((p) => p.id === g.presetId)}
+                  progress={progress.get(g.id) ?? null}
+                  onRegenerateNewSeed={onRegenerateNewSeed}
+                  onRetry={onRetry}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {singletons.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {singletons.map((g) => (
+            <GenerationCard
+              key={g.id}
+              gen={g}
+              preset={presets.find((p) => p.id === g.presetId)}
+              progress={progress.get(g.id) ?? null}
+              onRegenerateNewSeed={onRegenerateNewSeed}
+              onRetry={onRetry}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GenerationCard({
   gen,
   preset,
   progress,
   onRegenerateNewSeed,
+  onRetry,
 }: {
   gen: Generation;
   preset?: Preset;
   progress: ProgressState | null;
   onRegenerateNewSeed: (gen: Generation) => void;
+  onRetry: (gen: Generation) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const isLive = progress && progress.phase !== "done" && progress.phase !== "error";
   const profileMeta = SIZE_PROFILES.find((p) => p.id === gen.sizeProfile);
   const aspectStyle = profileMeta
@@ -1098,12 +1719,36 @@ function GenerationCard({
         style={aspectStyle}
       >
         {gen.outputUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={gen.outputUrl}
-            alt="generated"
-            className="h-full w-full object-cover"
-          />
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setLightboxOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setLightboxOpen(true);
+              }
+            }}
+            draggable
+            onDragStart={(e) => {
+              if (gen.outputUrl) {
+                e.dataTransfer.setData("text/uri-list", gen.outputUrl);
+                e.dataTransfer.setData("text/plain", gen.outputUrl);
+                e.dataTransfer.effectAllowed = "copy";
+              }
+            }}
+            className="block h-full w-full cursor-zoom-in"
+            aria-label="Open larger version (or drag onto a preset chip)"
+            title="Click to enlarge · drag onto a preset chip to add as reference"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={gen.outputUrl}
+              alt="generated"
+              draggable={false}
+              className="h-full w-full object-cover"
+            />
+          </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center text-xs text-zinc-500">
             {progress && progress.phase === "error" ? (
@@ -1150,6 +1795,24 @@ function GenerationCard({
           )}
           <QualityBadge quality={gen.quality} />
           <SizeBadge size={gen.size} profile={gen.sizeProfile} />
+          {gen.register && <RegisterBadge register={gen.register} />}
+          {gen.packRole && (
+            <span
+              className="inline-flex items-center rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
+              title={gen.shotFraming ?? ""}
+            >
+              {gen.packRole}
+            </span>
+          )}
+          {typeof gen.colorMaxDeltaE === "number" &&
+            gen.status === "succeeded" && (
+              <ColorDriftBadge
+                maxDeltaE={gen.colorMaxDeltaE}
+                avgDeltaE={gen.colorAvgDeltaE ?? 0}
+                source={gen.sourceColors ?? []}
+                output={gen.outputColors ?? []}
+              />
+            )}
           {typeof gen.seed === "number" && (
             <SeedBadge
               seed={gen.seed}
@@ -1161,20 +1824,162 @@ function GenerationCard({
             />
           )}
         </div>
-        {gen.constructedPrompt && (
-          <button
-            onClick={() => setOpen((o) => !o)}
-            className="mt-2 text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
-          >
-            {open ? "Hide prompt" : "Show prompt"}
-          </button>
-        )}
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          {gen.status === "failed" && !isLive && (
+            <button
+              onClick={() => onRetry(gen)}
+              className="rounded-md bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-rose-500"
+              title="Retry with the same prompt + a fresh seed"
+            >
+              ↻ Regenerate
+            </button>
+          )}
+          {gen.constructedPrompt && (
+            <button
+              onClick={() => setOpen((o) => !o)}
+              className="text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+            >
+              {open ? "Hide prompt" : "Show prompt"}
+            </button>
+          )}
+          {Boolean(
+            gen.falEndpoint || gen.falInput || gen.falResponse,
+          ) && (
+            <button
+              onClick={() => setDebugOpen((o) => !o)}
+              className="text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+            >
+              {debugOpen ? "Hide fal request" : "Show fal request"}
+            </button>
+          )}
+        </div>
         {open && gen.constructedPrompt && (
           <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-zinc-50 p-2 text-[11px] leading-relaxed text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
             {gen.constructedPrompt}
           </pre>
         )}
+        {debugOpen && (
+          <FalRequestDetails gen={gen} />
+        )}
       </div>
+      {lightboxOpen && gen.outputUrl && (
+        <ImageLightbox
+          imageUrl={gen.outputUrl}
+          caption={`${gen.model}${
+            gen.packRole ? ` · ${gen.packRole}` : ""
+          } · ${gen.size}${
+            typeof gen.seed === "number" ? ` · seed ${gen.seed}` : ""
+          }`}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ImageLightbox({
+  imageUrl,
+  caption,
+  onClose,
+}: {
+  imageUrl: string;
+  caption?: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/85 p-6 backdrop-blur"
+      onClick={onClose}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={imageUrl}
+        alt=""
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[88vh] max-w-[92vw] cursor-zoom-out rounded-md object-contain shadow-2xl"
+      />
+      <div className="flex items-center gap-4 text-xs text-white/80">
+        {caption && <span>{caption}</span>}
+        <a
+          href={imageUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="rounded border border-white/30 px-2 py-1 hover:bg-white/10"
+        >
+          Open original
+        </a>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded border border-white/30 px-2 py-1 hover:bg-white/10"
+        >
+          Close (Esc)
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FalRequestDetails({ gen }: { gen: Generation }) {
+  const sections: { label: string; value: unknown }[] = [
+    { label: "endpoint", value: gen.falEndpoint },
+    { label: "request_id", value: gen.falRequestId },
+    { label: "model used", value: gen.model },
+    { label: "requested model", value: gen.requestedModel },
+    { label: "size profile → native", value: `${gen.sizeProfile} → ${gen.size}` },
+    { label: "quality", value: gen.quality },
+    { label: "seed", value: gen.seed },
+    { label: "fal input", value: gen.falInput },
+    { label: "fal response", value: gen.falResponse },
+  ];
+  return (
+    <div className="mt-2 space-y-2 rounded bg-zinc-50 p-2 text-[11px] leading-relaxed dark:bg-zinc-950">
+      {sections
+        .filter((s) => s.value !== undefined && s.value !== null)
+        .map((s) => (
+          <div key={s.label}>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+              {s.label}
+            </div>
+            {typeof s.value === "string" || typeof s.value === "number" ? (
+              <div className="break-all font-mono text-zinc-800 dark:text-zinc-200">
+                {String(s.value)}
+              </div>
+            ) : (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                {JSON.stringify(s.value, null, 2)}
+              </pre>
+            )}
+          </div>
+        ))}
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(
+            JSON.stringify(
+              {
+                endpoint: gen.falEndpoint,
+                request_id: gen.falRequestId,
+                input: gen.falInput,
+                response: gen.falResponse,
+              },
+              null,
+              2,
+            ),
+          );
+        }}
+        className="rounded border border-zinc-300 px-2 py-1 text-[11px] hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+      >
+        Copy debug JSON
+      </button>
     </div>
   );
 }
@@ -1191,6 +1996,10 @@ const MODEL_DISPLAY: Record<ImageModelId, { short: string; cls: string }> = {
   "flux-kontext": {
     short: "FLUX Kontext",
     cls: "bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900/40 dark:text-fuchsia-200",
+  },
+  "flux-2": {
+    short: "FLUX 2",
+    cls: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200",
   },
 };
 
@@ -1298,6 +2107,82 @@ function QualityBadge({ quality }: { quality?: Generation["quality"] }) {
   );
 }
 
+function ColorDriftBadge({
+  maxDeltaE,
+  avgDeltaE,
+  source,
+  output,
+}: {
+  maxDeltaE: number;
+  avgDeltaE: number;
+  source: { hex: string; label: string }[];
+  output: { hex: string; label: string }[];
+}) {
+  const status =
+    maxDeltaE < 12 ? "ok" : maxDeltaE < 25 ? "drift" : "severe";
+  const cls =
+    status === "ok"
+      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+      : status === "drift"
+        ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+        : "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200";
+  const label =
+    status === "ok"
+      ? "color ok"
+      : status === "drift"
+        ? "color drift"
+        : "severe drift";
+  const tooltipLines = [
+    `max ΔE ${maxDeltaE.toFixed(1)} · avg ΔE ${avgDeltaE.toFixed(1)}`,
+    `source: ${source.map((s) => s.hex).join(", ")}`,
+    `output: ${output.map((o) => o.hex).join(", ")}`,
+  ].join("\n");
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
+      title={tooltipLines}
+    >
+      <span>{label}</span>
+      <span className="font-mono">ΔE {maxDeltaE.toFixed(0)}</span>
+      {source.slice(0, 2).map((s, i) => (
+        <span key={i} className="flex items-center gap-0.5">
+          <span
+            className="inline-block h-2 w-2 rounded-sm border border-black/10"
+            style={{ backgroundColor: s.hex }}
+          />
+          <span
+            className="inline-block h-2 w-2 rounded-sm border border-black/10"
+            style={{ backgroundColor: output[i]?.hex ?? "#000" }}
+          />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function RegisterBadge({ register }: { register: RegisterId }) {
+  const meta = REGISTERS.find((r) => r.id === register);
+  if (!meta) return null;
+  const cls: Record<RegisterId, string> = {
+    "catalog-dtc":
+      "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200",
+    "editorial-fashion":
+      "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200",
+    "sun-drenched-lifestyle":
+      "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200",
+    "studio-glamour":
+      "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200",
+  };
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${cls[register]}`}
+      title={meta.hint}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 function SizeBadge({
   size,
   profile,
@@ -1347,6 +2232,49 @@ function PhaseSpinner() {
       className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-zinc-700 dark:border-t-zinc-200"
       aria-hidden="true"
     />
+  );
+}
+
+function Pagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  const start = page * pageSize + 1;
+  const end = Math.min(total, (page + 1) * pageSize);
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
+      <span>
+        Showing {start}–{end} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => onPageChange(Math.max(0, page - 1))}
+          disabled={page === 0}
+          className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+        >
+          ‹ Prev
+        </button>
+        <span>
+          Page {page + 1} / {totalPages}
+        </span>
+        <button
+          onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+          disabled={page >= totalPages - 1}
+          className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+        >
+          Next ›
+        </button>
+      </div>
+    </div>
   );
 }
 

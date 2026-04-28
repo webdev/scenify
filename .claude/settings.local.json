@@ -24,7 +24,9 @@
       "Bash(sed -i '' 's|import \"dotenv/config\";||' probe-claude.mjs)",
       "Bash(node --env-file=.env.local probe-claude.mjs)",
       "Bash(env)",
-      "Bash(xxd /Users/gblazer/workspace/sceneify/.env.local)"
+      "Bash(xxd /Users/gblazer/workspace/sceneify/.env.local)",
+      "Bash(rm -rf /Users/gblazer/workspace/sceneify/drizzle/*)",
+      "Bash(pnpm db:generate)"
     ]
   }
 }

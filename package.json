@@ -3,21 +3,30 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL; next dev",
+    "dev": "unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL OPENAI_API_KEY OPENAI_BASE_URL; next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "import-sources": "node --experimental-strip-types scripts/import-sources.ts"
+    "import-sources": "tsx scripts/import-sources.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs migrate",
+    "db:migrate-presets": "tsx --env-file=.env.local scripts/migrate-presets-to-db.ts",
+    "db:migrate-test-products": "tsx --env-file=.env.local scripts/migrate-test-products-to-db.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/openai": "^3.0.53",
     "@fal-ai/client": "^1.9.6",
+    "@neondatabase/serverless": "^1.1.0",
     "@vercel/blob": "^2.3.3",
     "ai": "^6.0.168",
+    "drizzle-orm": "^0.45.2",
     "nanoid": "^5.1.9",
     "next": "16.2.4",
+    "next-auth": "5.0.0-beta.31",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-photo-album": "^3.6.0",
     "sharp": "^0.34.5",
     "zod": "^4.3.6"
   },
@@ -26,9 +35,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

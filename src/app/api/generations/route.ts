@@ -12,7 +12,10 @@ import { constructPrompt } from "@/lib/prompt-construction";
 import { generateImage } from "@/lib/image-gen";
 import { publicUrl, fetchToBuffer, saveBufferAsImage } from "@/lib/storage";
 import { resizeToTarget } from "@/lib/postprocess";
-import { predictGptImageRejection } from "@/lib/safety-prediction";
+import {
+  comparePalettes,
+  extractDominantColors,
+} from "@/lib/color-extraction";
 import type {
   Generation,
   ImageModelId,
@@ -28,12 +31,28 @@ export const maxDuration = 300;
 const Body = z.object({
   sourceId: z.string().min(1),
   presetId: z.string().min(1),
-  model: z.enum(["gpt-image-2", "nano-banana-2", "flux-kontext"]),
+  model: z.enum(["gpt-image-2", "nano-banana-2", "flux-kontext", "flux-2"]),
   referenceUrls: z.array(z.string()).optional(),
   sizeProfile: z.string().optional(),
   quality: z.enum(["low", "medium", "high", "auto"]).optional(),
   seed: z.number().int().nonnegative().optional(),
+  register: z
+    .enum([
+      "catalog-dtc",
+      "editorial-fashion",
+      "sun-drenched-lifestyle",
+      "studio-glamour",
+    ])
+    .optional(),
   reusePromptFromGenerationId: z.string().optional(),
+  // Listing-pack fields. When packId is set, this generation is part of a
+  // multi-shot pack. shotFraming overrides the framing language in the
+  // constructed prompt for this specific shot.
+  packId: z.string().optional(),
+  packPlatform: z.string().optional(),
+  packRole: z.string().optional(),
+  packShotIndex: z.number().int().nonnegative().optional(),
+  shotFraming: z.string().optional(),
 });
 
 function randomSeed(): number {
@@ -88,7 +107,13 @@ export async function POST(req: Request) {
     sizeProfile,
     quality,
     seed,
+    register,
     reusePromptFromGenerationId,
+    packId,
+    packPlatform,
+    packRole,
+    packShotIndex,
+    shotFraming,
   } = parsed.data;
 
   const [source, preset] = await Promise.all([
@@ -105,16 +130,19 @@ export async function POST(req: Request) {
 
   let reusedConstructedPrompt: string | undefined;
   let reusedSeed: number | undefined;
+  let reusedRegister: typeof register | undefined;
   if (reusePromptFromGenerationId) {
     const { getGeneration } = await import("@/lib/db");
     const prior = await getGeneration(reusePromptFromGenerationId);
     if (prior?.constructedPrompt) {
       reusedConstructedPrompt = prior.constructedPrompt;
       reusedSeed = prior.seed;
+      reusedRegister = prior.register;
     }
   }
 
   const resolvedSeed: number = seed ?? reusedSeed ?? randomSeed();
+  const resolvedRegister = register ?? reusedRegister ?? "catalog-dtc";
 
   const generation: Generation = {
     id: nanoid(12),
@@ -126,8 +154,14 @@ export async function POST(req: Request) {
     quality: resolvedQuality,
     sizeProfile: resolvedSizeProfile,
     seed: resolvedSeed,
+    register: resolvedRegister,
     status: "pending",
     constructedPrompt: reusedConstructedPrompt,
+    packId,
+    packPlatform,
+    packRole,
+    packShotIndex,
+    shotFraming,
     createdAt: new Date().toISOString(),
   };
   await addGeneration(generation);
@@ -150,44 +184,45 @@ export async function POST(req: Request) {
       try {
         await updateGeneration(generation.id, { status: "running" });
 
+        // Always fetch the source buffer and extract dominant colors —
+        // we use them in both the prompt (Phase 1: hex injection) and the
+        // post-flight delta-E check (Phase 2: drift verification).
+        send({ type: "phase", phase: "fetching_source" });
+        const { buffer: sourceBuf, mimeType: sourceMime } =
+          await fetchToBuffer(sourceAbsolute);
+        const sourceColors = await extractDominantColors(sourceBuf, 4).catch(
+          () => [],
+        );
+
         let constructedPrompt: string;
         if (reusedConstructedPrompt) {
           constructedPrompt = reusedConstructedPrompt;
           send({ type: "prompt", constructedPrompt });
         } else {
-          send({ type: "phase", phase: "fetching_source" });
-          const { buffer, mimeType } = await fetchToBuffer(sourceAbsolute);
-          const imageBase64 = buffer.toString("base64");
+          const imageBase64 = sourceBuf.toString("base64");
 
           send({ type: "phase", phase: "constructing_prompt" });
           constructedPrompt = await constructPrompt({
             preset,
             sourceImageBase64: imageBase64,
-            sourceImageMimeType: mimeType,
+            sourceImageMimeType: sourceMime,
             referenceUrlsOverride: referenceUrls,
+            register: resolvedRegister,
+            shotFraming,
+            sourceColors,
           });
           await updateGeneration(generation.id, { constructedPrompt });
           send({ type: "prompt", constructedPrompt });
         }
 
-        let effectiveModel: ImageModelId = generation.model;
-        if (effectiveModel === "gpt-image-2") {
-          const prediction = predictGptImageRejection(constructedPrompt);
-          if (prediction.risky) {
-            effectiveModel = "nano-banana-2";
-            send({
-              type: "model_routed",
-              fromModel: generation.model,
-              toModel: effectiveModel,
-              matched: prediction.matched,
-            });
-            await updateGeneration(generation.id, { model: effectiveModel });
-          }
-        }
-
+        // No pre-flight model routing. Default model (typically gpt-image-2)
+        // is tried first; the post-flight fallback chain in image-gen.ts
+        // catches 422 / content-policy responses and retries on the next
+        // model in the chain. The card's `requestedModel` reflects the user's
+        // pick; `model` reflects what actually rendered.
         send({ type: "phase", phase: "calling_fal" });
         const result = await generateImage({
-          model: effectiveModel,
+          model: generation.model,
           prompt: constructedPrompt,
           referenceImageUrls: [sourceAbsolute],
           size: resolvedSize,
@@ -214,6 +249,16 @@ export async function POST(req: Request) {
 
         send({ type: "phase", phase: "saving_output" });
         const out = await fetchToBuffer(result.imageUrl);
+
+        // Phase 2: extract output colors and compute delta-E vs source.
+        const outputColors = await extractDominantColors(out.buffer, 4).catch(
+          () => [],
+        );
+        const comparison =
+          sourceColors.length > 0 && outputColors.length > 0
+            ? comparePalettes(sourceColors, outputColors)
+            : { maxDeltaE: 0, avgDeltaE: 0, matched: [] };
+
         const resized = await resizeToTarget(out.buffer, profile.target);
         const stored = await saveBufferAsImage(
           resized.buffer,
@@ -225,6 +270,14 @@ export async function POST(req: Request) {
           status: "succeeded",
           outputUrl: stored.url,
           model: result.modelUsed,
+          falEndpoint: result.endpoint,
+          falRequestId: result.requestId,
+          falInput: result.input,
+          falResponse: result.raw,
+          sourceColors,
+          outputColors,
+          colorMaxDeltaE: comparison.maxDeltaE,
+          colorAvgDeltaE: comparison.avgDeltaE,
           completedAt: new Date().toISOString(),
         });
         send({ type: "done", generation: finalized! });

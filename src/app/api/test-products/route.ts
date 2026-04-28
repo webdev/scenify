@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
-import { listTestProductFilenames } from "@/lib/test-products";
+import { listTestProducts } from "@/lib/test-products";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const filenames = await listTestProductFilenames();
-  const products = filenames.map((filename) => ({
-    filename,
-    url: `/api/test-products/${encodeURIComponent(filename)}`,
-  }));
+  const products = await listTestProducts();
+  // Field name `filename` kept stable for the existing dashboard. The `url`
+  // is now a Vercel Blob URL (no longer a proxy through this API).
   return NextResponse.json({ products });
 }

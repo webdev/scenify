@@ -12,8 +12,18 @@ export async function GET(req: Request) {
   if (!imagePath) {
     return NextResponse.json({ error: "missing path" }, { status: 400 });
   }
-  if (!imagePath.startsWith("/presets/") || imagePath.includes("..")) {
-    return NextResponse.json({ error: "path must be /presets/..." }, { status: 400 });
+  // Accept Blob URLs and legacy /presets/... paths.
+  const isHttp =
+    imagePath.startsWith("http://") || imagePath.startsWith("https://");
+  const isLocal = imagePath.startsWith("/presets/");
+  if (!isHttp && !isLocal) {
+    return NextResponse.json(
+      { error: "path must be a public URL or start with /presets/" },
+      { status: 400 },
+    );
+  }
+  if (imagePath.includes("..")) {
+    return NextResponse.json({ error: "invalid path" }, { status: 400 });
   }
 
   try {

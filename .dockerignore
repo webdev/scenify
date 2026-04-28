@@ -1,0 +1,58 @@
+# Build output
+.next
+out
+build
+
+# Dependencies (re-installed inside the image)
+node_modules
+.pnpm-store
+
+# Local runtime state — bake-in is wrong; the volume mount provides this.
+data
+
+# Local-only env (use --env-file or env_file in compose; never bake)
+.env*.local
+.env
+
+# User-uploaded source product photos (use Vercel Blob in prod)
+public/uploads
+
+# Test fixtures (not needed at runtime)
+test-sources
+
+# Vercel link metadata
+.vercel
+
+# Git / IDE / OS
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+.DS_Store
+
+# Claude / agent state
+.claude
+.cursor
+
+# Markdown that doesn't ship
+README.md
+CLAUDE.md
+AGENTS.md
+
+# Probe scripts and ephemeral assets
+probe-*.mjs
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Dockerfile itself
+Dockerfile
+docker-compose*.yml

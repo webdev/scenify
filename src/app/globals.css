@@ -33,3 +33,14 @@ body {
     transform: translateX(400%);
   }
 }
+
+/* react-photo-album doesn't expose a `group` class on its photo wrappers, so
+ * overlay buttons use :has() to detect hover on the wrapping div. */
+*:has(> [data-album-delete-btn]):hover [data-album-delete-btn],
+*:has(> [data-album-inspect-btn]):hover [data-album-inspect-btn],
+*:has(> [data-album-favorite-btn="off"]):hover [data-album-favorite-btn="off"],
+[data-album-delete-btn]:focus-visible,
+[data-album-inspect-btn]:focus-visible,
+[data-album-favorite-btn]:focus-visible {
+  opacity: 1;
+}

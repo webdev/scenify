@@ -1,0 +1,32 @@
+# Local stand-up: `docker compose up --build`
+# Reads env from .env.local (FAL_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY,
+# BLOB_READ_WRITE_TOKEN, etc.). Persists the JSON db + prompt cache via a
+# named volume so generations survive container restarts.
+
+services:
+  sceneify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sceneify:local
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    volumes:
+      # Runtime state (json db + Claude/GPT-4o per-image prompt cache).
+      - sceneify_data:/app/data
+      # Optional: persist locally-stored uploads when BLOB_READ_WRITE_TOKEN
+      # is NOT set. With Vercel Blob this volume is unused.
+      - sceneify_uploads:/app/public/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/presets').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  sceneify_data:
+  sceneify_uploads:
