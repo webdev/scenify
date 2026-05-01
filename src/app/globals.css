@@ -39,8 +39,10 @@ body {
 *:has(> [data-album-delete-btn]):hover [data-album-delete-btn],
 *:has(> [data-album-inspect-btn]):hover [data-album-inspect-btn],
 *:has(> [data-album-favorite-btn="off"]):hover [data-album-favorite-btn="off"],
+*:has(> [data-album-hero-btn="off"]):hover [data-album-hero-btn="off"],
 [data-album-delete-btn]:focus-visible,
 [data-album-inspect-btn]:focus-visible,
-[data-album-favorite-btn]:focus-visible {
+[data-album-favorite-btn]:focus-visible,
+[data-album-hero-btn]:focus-visible {
   opacity: 1;
 }

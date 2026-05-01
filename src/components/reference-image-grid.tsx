@@ -13,6 +13,9 @@ interface Props {
   onInspect?: (url: string) => void;
   enableDelete?: boolean;
   enableFavorite?: boolean;
+  enableHero?: boolean;
+  /** URL of the preset's current hero/display image, if any. */
+  heroImageUrl?: string | null;
   /** Source preset's DB id — set when dragged images should be MOVED. */
   sourcePresetDbId?: string;
   /** Target row height. Partial rows are capped at this same value so a
@@ -28,6 +31,8 @@ export default function ReferenceImageGrid({
   onInspect,
   enableDelete = false,
   enableFavorite = false,
+  enableHero = false,
+  heroImageUrl = null,
   sourcePresetDbId,
   targetRowHeight = 240,
   spacing = 12,
@@ -111,6 +116,12 @@ export default function ReferenceImageGrid({
               )}
               {enableFavorite && (
                 <FavoriteButton imageId={item.id} initial={item.favorited} />
+              )}
+              {enableHero && (
+                <HeroButton
+                  imageId={item.id}
+                  isHero={heroImageUrl === item.url}
+                />
               )}
               {isSel && (
                 <span className="pointer-events-none absolute bottom-1.5 left-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
@@ -224,6 +235,69 @@ function FavoriteButton({
   );
 }
 
+function HeroButton({
+  imageId,
+  isHero,
+}: {
+  imageId: string;
+  isHero: boolean;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [optimistic, setOptimistic] = useState(isHero);
+  const active = busy ? optimistic : isHero;
+  return (
+    <button
+      type="button"
+      data-album-hero-btn={active ? "on" : "off"}
+      onClick={async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (busy) return;
+        const next = !active;
+        setOptimistic(next);
+        setBusy(true);
+        try {
+          const res = await fetch(
+            `/api/admin/preset-images/${imageId}/hero`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ hero: next }),
+            },
+          );
+          if (!res.ok) throw new Error(await res.text());
+          router.refresh();
+        } catch (err) {
+          setOptimistic(!next);
+          alert(`Hero failed: ${err instanceof Error ? err.message : err}`);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      aria-label={active ? "Unset display image" : "Set as display image"}
+      title={active ? "Display image (click to unset)" : "Set as display image"}
+      className={`absolute left-10 top-1.5 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full shadow backdrop-blur transition ${
+        active
+          ? "bg-amber-400/95 text-zinc-900 opacity-100"
+          : "bg-black/55 text-white opacity-0 hover:bg-amber-400 hover:text-zinc-900"
+      }`}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill={active ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        className="h-4 w-4"
+        aria-hidden="true"
+      >
+        <path d="M12 3l2.6 5.5 6 .9-4.3 4.3 1 6.1L12 17.8 6.7 19.8l1-6.1L3.4 9.4l6-.9L12 3z" />
+      </svg>
+    </button>
+  );
+}
+
 function DeleteButton({ imageId }: { imageId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -236,7 +310,7 @@ function DeleteButton({ imageId }: { imageId: string }) {
         e.preventDefault();
         e.stopPropagation();
         if (busy) return;
-        if (!confirm("Delete this reference image?")) return;
+        if (!confirm("Remove this image from the preset?")) return;
         setBusy(true);
         try {
           const res = await fetch(`/api/admin/preset-images/${imageId}`, {

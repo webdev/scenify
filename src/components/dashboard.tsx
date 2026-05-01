@@ -900,7 +900,7 @@ export default function Dashboard({
                           const count = selectedRefs.size;
                           if (
                             !confirm(
-                              `Delete ${count} reference image${count === 1 ? "" : "s"}? This can't be undone.`,
+                              `Remove ${count} reference image${count === 1 ? "" : "s"} from this preset?`,
                             )
                           )
                             return;
@@ -1136,6 +1136,8 @@ export default function Dashboard({
                       onInspect={setInspectImage}
                       enableFavorite
                       enableDelete
+                      enableHero
+                      heroImageUrl={activePreset.heroImageUrl}
                       sourcePresetDbId={activePreset.dbId}
                     />
                   </div>
@@ -1569,6 +1571,7 @@ export default function Dashboard({
                         progress={progress}
                         onRegenerateNewSeed={onRegenerateNewSeed}
                         onRetry={onRetry}
+                        onAddToPreset={onAddImageToPreset}
                       />
                     )}
                   </div>
@@ -1919,12 +1922,18 @@ function SourceGenerations({
   progress,
   onRegenerateNewSeed,
   onRetry,
+  onAddToPreset,
 }: {
   gens: Generation[];
   presets: Preset[];
   progress: Map<string, ProgressState>;
   onRegenerateNewSeed: (gen: Generation) => void;
   onRetry: (gen: Generation) => void;
+  onAddToPreset: (
+    presetDbId: string,
+    presetName: string,
+    imageUrl: string,
+  ) => Promise<void>;
 }) {
   // Group by packId. Standalones (no packId) end up in `singletons`.
   const packs = new Map<string, Generation[]>();
@@ -1989,6 +1998,8 @@ function SourceGenerations({
                   progress={progress.get(g.id) ?? null}
                   onRegenerateNewSeed={onRegenerateNewSeed}
                   onRetry={onRetry}
+                  presets={presets}
+                  onAddToPreset={onAddToPreset}
                 />
               ))}
             </div>
@@ -2005,6 +2016,8 @@ function SourceGenerations({
               progress={progress.get(g.id) ?? null}
               onRegenerateNewSeed={onRegenerateNewSeed}
               onRetry={onRetry}
+              presets={presets}
+              onAddToPreset={onAddToPreset}
             />
           ))}
         </div>
@@ -2019,16 +2032,25 @@ function GenerationCard({
   progress,
   onRegenerateNewSeed,
   onRetry,
+  presets,
+  onAddToPreset,
 }: {
   gen: Generation;
   preset?: Preset;
   progress: ProgressState | null;
   onRegenerateNewSeed: (gen: Generation) => void;
   onRetry: (gen: Generation) => void;
+  presets: Preset[];
+  onAddToPreset: (
+    presetDbId: string,
+    presetName: string,
+    imageUrl: string,
+  ) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const isLive = progress && progress.phase !== "done" && progress.phase !== "error";
   const profileMeta = SIZE_PROFILES.find((p) => p.id === gen.sizeProfile);
   const aspectStyle = profileMeta
@@ -2060,6 +2082,11 @@ function GenerationCard({
                 setLightboxOpen(true);
               }
             }}
+            onContextMenu={(e) => {
+              if (!gen.outputUrl) return;
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY });
+            }}
             draggable
             onDragStart={(e) => {
               if (gen.outputUrl) {
@@ -2069,14 +2096,20 @@ function GenerationCard({
               }
             }}
             className="block h-full w-full cursor-zoom-in"
-            aria-label="Open larger version (or drag onto a preset chip)"
-            title="Click to enlarge · drag onto a preset chip to add as reference"
+            aria-label="Open larger version (or drag, or right-click to add to a preset)"
+            title="Click to enlarge · drag onto a preset chip · right-click to add to a preset"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={gen.outputUrl}
               alt="generated"
               draggable={false}
+              onContextMenu={(e) => {
+                if (!gen.outputUrl) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setMenu({ x: e.clientX, y: e.clientY });
+              }}
               className="h-full w-full object-cover"
             />
           </div>
@@ -2154,6 +2187,11 @@ function GenerationCard({
               }
             />
           )}
+          <LatencyBadge
+            createdAt={gen.createdAt}
+            completedAt={gen.completedAt}
+            live={Boolean(isLive)}
+          />
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           {gen.status === "failed" && !isLive && (
@@ -2204,6 +2242,98 @@ function GenerationCard({
           onClose={() => setLightboxOpen(false)}
         />
       )}
+      {menu && gen.outputUrl && (
+        <AddToPresetMenu
+          x={menu.x}
+          y={menu.y}
+          presets={presets}
+          onPick={async (p) => {
+            setMenu(null);
+            await onAddToPreset(p.dbId, p.name, gen.outputUrl!);
+          }}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddToPresetMenu({
+  x,
+  y,
+  presets,
+  onPick,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  presets: Preset[];
+  onPick: (p: Preset) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const filtered = query.trim()
+    ? presets.filter((p) =>
+        p.name.toLowerCase().includes(query.trim().toLowerCase()),
+      )
+    : presets;
+
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+  const W = 240;
+  const H = 320;
+  const left = Math.min(x, vw - W - 8);
+  const top = Math.min(y, vh - H - 8);
+
+  return (
+    <div
+      ref={ref}
+      style={{ position: "fixed", left, top, width: W, zIndex: 1000 }}
+      className="overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+    >
+      <div className="border-b border-zinc-200 px-2 py-1.5 dark:border-zinc-800">
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Add to preset…"
+          className="w-full bg-transparent text-xs outline-none placeholder:text-zinc-400"
+        />
+      </div>
+      <div className="max-h-72 overflow-auto py-1">
+        {filtered.length === 0 ? (
+          <div className="px-3 py-2 text-xs text-zinc-500">No matches</div>
+        ) : (
+          filtered.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => onPick(p)}
+              className="block w-full truncate px-3 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              {p.name}
+            </button>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -2345,6 +2475,47 @@ function ModelBadge({ model }: { model: ImageModelId }) {
       title={`Rendered by ${meta.short}`}
     >
       {meta.short}
+    </span>
+  );
+}
+
+function formatLatency(ms: number) {
+  if (!Number.isFinite(ms) || ms < 0) return "–";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  const m = Math.floor(s / 60);
+  const r = Math.round(s - m * 60);
+  return `${m}m${r.toString().padStart(2, "0")}s`;
+}
+
+function LatencyBadge({
+  createdAt,
+  completedAt,
+  live,
+}: {
+  createdAt: string;
+  completedAt?: string;
+  live: boolean;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    const id = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, [live]);
+  const start = new Date(createdAt).getTime();
+  const end = completedAt ? new Date(completedAt).getTime() : live ? now : start;
+  const ms = Math.max(0, end - start);
+  const cls = live
+    ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+    : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums ${cls}`}
+      title={live ? "Elapsed time" : "Total render time (created → completed)"}
+    >
+      {live ? "⏱" : "⏱"} {formatLatency(ms)}
     </span>
   );
 }
