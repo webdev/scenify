@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
   addGeneration,
+  getGeneration,
   getPreset,
   getSource,
   listGenerations,
@@ -45,6 +46,12 @@ const Body = z.object({
   packRole: z.string().optional(),
   packShotIndex: z.number().int().nonnegative().optional(),
   shotFraming: z.string().optional(),
+  // Complete-look mode: when set, this generation is a follow-up shot that
+  // visually continues `parentGenerationId`. The parent's outputUrl becomes
+  // the image_urls input to fal (instead of the source garment photo), and
+  // `prebuiltPrompt` (if provided) bypasses the gpt-4o prompt-construction pass.
+  parentGenerationId: z.string().optional(),
+  prebuiltPrompt: z.string().optional(),
 });
 
 function randomSeed(): number {
@@ -105,6 +112,8 @@ export async function POST(req: Request) {
     packRole,
     packShotIndex,
     shotFraming,
+    parentGenerationId,
+    prebuiltPrompt,
   } = parsed.data;
 
   const [source, preset] = await Promise.all([
@@ -114,16 +123,26 @@ export async function POST(req: Request) {
   if (!source) return NextResponse.json({ error: "source not found" }, { status: 404 });
   if (!preset) return NextResponse.json({ error: "preset not found" }, { status: 404 });
 
+  let parent: Generation | undefined;
+  if (parentGenerationId) {
+    parent = await getGeneration(parentGenerationId);
+    if (!parent || !parent.outputUrl) {
+      return NextResponse.json(
+        { error: "parent generation not found or has no output" },
+        { status: 400 },
+      );
+    }
+  }
+
   const profile = SIZE_PROFILES.find((p) => p.id === sizeProfile) ?? SIZE_PROFILES[0];
   const resolvedSize: ImageSize = profile.nativeSize;
   const resolvedQuality: ImageQuality = quality ?? "low";
   const resolvedSizeProfile: SizeProfileId = profile.id;
 
-  let reusedConstructedPrompt: string | undefined;
+  let reusedConstructedPrompt: string | undefined = prebuiltPrompt;
   let reusedSeed: number | undefined;
-  let reusedRegister: Generation["register"] | undefined;
-  if (reusePromptFromGenerationId) {
-    const { getGeneration } = await import("@/lib/db");
+  let reusedRegister: Generation["register"] | undefined = parent?.register;
+  if (reusePromptFromGenerationId && !reusedConstructedPrompt) {
     const prior = await getGeneration(reusePromptFromGenerationId);
     if (prior?.constructedPrompt) {
       reusedConstructedPrompt = prior.constructedPrompt;
@@ -131,6 +150,7 @@ export async function POST(req: Request) {
       reusedRegister = prior.register;
     }
   }
+  if (parent && reusedSeed === undefined) reusedSeed = parent.seed;
 
   const resolvedSeed: number = seed ?? reusedSeed ?? randomSeed();
 
@@ -152,11 +172,17 @@ export async function POST(req: Request) {
     packRole,
     packShotIndex,
     shotFraming,
+    parentGenerationId,
     createdAt: new Date().toISOString(),
   };
   await addGeneration(generation);
 
-  const sourceAbsolute = publicUrl(req, source.url);
+  // Complete-look mode swaps the visual seed: instead of feeding the source
+  // garment photo to fal, we feed the parent's rendered output so the model
+  // continues from THAT image (preserving model identity + scene).
+  const sourceAbsolute = parent?.outputUrl
+    ? parent.outputUrl
+    : publicUrl(req, source.url);
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({

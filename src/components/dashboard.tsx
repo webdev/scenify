@@ -340,6 +340,10 @@ export default function Dashboard({
         packRole?: string;
         packShotIndex?: number;
         shotFraming?: string;
+        parentGenerationId?: string;
+        prebuiltPrompt?: string;
+        model?: ImageModelId;
+        presetIdOverride?: string;
       },
     ) => {
       const tempKey = `${sourceId}:${Date.now()}:${Math.random()}`;
@@ -354,8 +358,8 @@ export default function Dashboard({
           },
           body: JSON.stringify({
             sourceId,
-            presetId,
-            model,
+            presetId: overrides?.presetIdOverride ?? presetId,
+            model: overrides?.model ?? model,
             referenceUrls,
             quality: overrides?.quality ?? quality,
             sizeProfile: overrides?.sizeProfile ?? sizeProfile,
@@ -366,6 +370,8 @@ export default function Dashboard({
             packRole: overrides?.packRole,
             packShotIndex: overrides?.packShotIndex,
             shotFraming: overrides?.shotFraming,
+            parentGenerationId: overrides?.parentGenerationId,
+            prebuiltPrompt: overrides?.prebuiltPrompt,
           }),
         });
         if (!res.body) throw new Error("no response body");
@@ -510,6 +516,71 @@ export default function Dashboard({
       }
     },
     [router],
+  );
+
+  const onCompleteLook = useCallback(
+    async (gen: Generation, platform: PackPlatform) => {
+      if (!gen.outputUrl || gen.status !== "succeeded") return;
+      try {
+        const res = await fetch("/api/complete-look", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            generationId: gen.id,
+            platform,
+            model: "flux-kontext",
+            quality: gen.quality,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+        const plan = json as {
+          packId: string;
+          platform: PackPlatform;
+          seed: number;
+          parentGenerationId: string;
+          sourceId: string;
+          presetId: string;
+          model: ImageModelId;
+          shots: Array<{
+            packId: string;
+            packPlatform: PackPlatform;
+            packRole: string;
+            packShotIndex: number;
+            shotFraming: string;
+            sizeProfile: string;
+            seed: number;
+            label: string;
+            prompt: string;
+          }>;
+        };
+        await Promise.all(
+          plan.shots.map((shot) =>
+            runGeneration(plan.sourceId, [], {
+              quality: gen.quality,
+              sizeProfile: shot.sizeProfile as SizeProfileId,
+              seed: shot.seed,
+              packId: shot.packId,
+              packPlatform: shot.packPlatform,
+              packRole: shot.packRole,
+              packShotIndex: shot.packShotIndex,
+              shotFraming: shot.shotFraming,
+              parentGenerationId: plan.parentGenerationId,
+              prebuiltPrompt: shot.prompt,
+              model: plan.model,
+              presetIdOverride: plan.presetId,
+            }),
+          ),
+        );
+        await refresh();
+      } catch (err) {
+        console.error("complete-look failed:", err);
+        alert(
+          `Complete look failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+    [runGeneration, refresh],
   );
 
   const onRetry = useCallback(
@@ -1572,6 +1643,7 @@ export default function Dashboard({
                         onRegenerateNewSeed={onRegenerateNewSeed}
                         onRetry={onRetry}
                         onAddToPreset={onAddImageToPreset}
+                        onCompleteLook={onCompleteLook}
                       />
                     )}
                   </div>
@@ -1923,6 +1995,7 @@ function SourceGenerations({
   onRegenerateNewSeed,
   onRetry,
   onAddToPreset,
+  onCompleteLook,
 }: {
   gens: Generation[];
   presets: Preset[];
@@ -1934,6 +2007,7 @@ function SourceGenerations({
     presetName: string,
     imageUrl: string,
   ) => Promise<void>;
+  onCompleteLook: (gen: Generation, platform: PackPlatform) => Promise<void>;
 }) {
   // Group by packId. Standalones (no packId) end up in `singletons`.
   const packs = new Map<string, Generation[]>();
@@ -1989,36 +2063,40 @@ function SourceGenerations({
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="columns-2 gap-3 sm:columns-3">
               {items.map((g) => (
-                <GenerationCard
-                  key={g.id}
-                  gen={g}
-                  preset={presets.find((p) => p.id === g.presetId)}
-                  progress={progress.get(g.id) ?? null}
-                  onRegenerateNewSeed={onRegenerateNewSeed}
-                  onRetry={onRetry}
-                  presets={presets}
-                  onAddToPreset={onAddToPreset}
-                />
+                <div key={g.id} className="mb-3 break-inside-avoid">
+                  <GenerationCard
+                    gen={g}
+                    preset={presets.find((p) => p.id === g.presetId)}
+                    progress={progress.get(g.id) ?? null}
+                    onRegenerateNewSeed={onRegenerateNewSeed}
+                    onRetry={onRetry}
+                    presets={presets}
+                    onAddToPreset={onAddToPreset}
+                    onCompleteLook={onCompleteLook}
+                  />
+                </div>
               ))}
             </div>
           </div>
         );
       })}
       {singletons.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="columns-2 gap-3 sm:columns-3">
           {singletons.map((g) => (
-            <GenerationCard
-              key={g.id}
-              gen={g}
-              preset={presets.find((p) => p.id === g.presetId)}
-              progress={progress.get(g.id) ?? null}
-              onRegenerateNewSeed={onRegenerateNewSeed}
-              onRetry={onRetry}
-              presets={presets}
-              onAddToPreset={onAddToPreset}
-            />
+            <div key={g.id} className="mb-3 break-inside-avoid">
+              <GenerationCard
+                gen={g}
+                preset={presets.find((p) => p.id === g.presetId)}
+                progress={progress.get(g.id) ?? null}
+                onRegenerateNewSeed={onRegenerateNewSeed}
+                onRetry={onRetry}
+                presets={presets}
+                onAddToPreset={onAddToPreset}
+                onCompleteLook={onCompleteLook}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -2034,6 +2112,7 @@ function GenerationCard({
   onRetry,
   presets,
   onAddToPreset,
+  onCompleteLook,
 }: {
   gen: Generation;
   preset?: Preset;
@@ -2046,11 +2125,15 @@ function GenerationCard({
     presetName: string,
     imageUrl: string,
   ) => Promise<void>;
+  onCompleteLook: (gen: Generation, platform: PackPlatform) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [completePlatformOpen, setCompletePlatformOpen] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const completeBtnRef = useRef<HTMLButtonElement>(null);
   const isLive = progress && progress.phase !== "done" && progress.phase !== "error";
   const profileMeta = SIZE_PROFILES.find((p) => p.id === gen.sizeProfile);
   const aspectStyle = profileMeta
@@ -2203,6 +2286,32 @@ function GenerationCard({
               ↻ Regenerate
             </button>
           )}
+          {gen.status === "succeeded" && gen.outputUrl && (
+            <button
+              ref={completeBtnRef}
+              onClick={() => setCompletePlatformOpen((o) => !o)}
+              disabled={completing}
+              className="rounded-md bg-zinc-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
+              title="Generate matching shots that continue this look (same model, same garment)"
+            >
+              {completing ? "Planning…" : "✨ Complete look"}
+            </button>
+          )}
+          {completePlatformOpen && completeBtnRef.current && (
+            <CompleteLookPlatformMenu
+              anchor={completeBtnRef.current}
+              onPick={async (platform) => {
+                setCompletePlatformOpen(false);
+                setCompleting(true);
+                try {
+                  await onCompleteLook(gen, platform);
+                } finally {
+                  setCompleting(false);
+                }
+              }}
+              onClose={() => setCompletePlatformOpen(false)}
+            />
+          )}
           {gen.constructedPrompt && (
             <button
               onClick={() => setOpen((o) => !o)}
@@ -2333,6 +2442,82 @@ function AddToPresetMenu({
             </button>
           ))
         )}
+      </div>
+    </div>
+  );
+}
+
+const COMPLETE_LOOK_PLATFORMS: Array<{
+  id: PackPlatform;
+  label: string;
+  hint: string;
+}> = [
+  { id: "amazon", label: "Amazon", hint: "6 shots · hero + lifestyle + details" },
+  { id: "shopify", label: "Shopify", hint: "4 shots · hero + supporting" },
+  { id: "instagram", label: "Instagram", hint: "4 frames · 4:5 carousel" },
+  { id: "tiktok", label: "TikTok", hint: "3 vertical · 9:16" },
+];
+
+function CompleteLookPlatformMenu({
+  anchor,
+  onPick,
+  onClose,
+}: {
+  anchor: HTMLElement;
+  onPick: (platform: PackPlatform) => void | Promise<void>;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (
+        !ref.current?.contains(e.target as Node) &&
+        !anchor.contains(e.target as Node)
+      ) {
+        onClose();
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose, anchor]);
+
+  const rect = anchor.getBoundingClientRect();
+  const W = 224;
+  const H = 220;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+  const left = Math.min(Math.max(8, rect.left), vw - W - 8);
+  const top = rect.bottom + H + 8 < vh ? rect.bottom + 4 : rect.top - H - 4;
+
+  return (
+    <div
+      ref={ref}
+      style={{ position: "fixed", left, top, width: W, zIndex: 1000 }}
+      className="overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+    >
+      <div className="border-b border-zinc-200 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+        Complete look as…
+      </div>
+      <div className="py-1">
+        {COMPLETE_LOOK_PLATFORMS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => onPick(p.id)}
+            className="block w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          >
+            <div className="font-medium text-zinc-800 dark:text-zinc-100">
+              {p.label}
+            </div>
+            <div className="text-[10px] text-zinc-500">{p.hint}</div>
+          </button>
+        ))}
       </div>
     </div>
   );

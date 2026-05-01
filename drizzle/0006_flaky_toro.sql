@@ -1,0 +1,1 @@
+ALTER TABLE "generation" ADD COLUMN "parent_generation_id" text;

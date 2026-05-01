@@ -307,6 +307,8 @@ export interface Generation {
   packRole?: string;
   packShotIndex?: number;
   shotFraming?: string;
+  /** Set when this generation is a "complete-look" follow-up to another. */
+  parentGenerationId?: string;
   /** Color verification (Phase 1+2). HEX swatches extracted from source/output. */
   sourceColors?: ColorSwatchSerialized[];
   outputColors?: ColorSwatchSerialized[];

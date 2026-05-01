@@ -43,6 +43,13 @@
       "when": 1777348324978,
       "tag": "0005_pink_sugar_man",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777663631599,
+      "tag": "0006_flaky_toro",
+      "breakpoints": true
     }
   ]
 }

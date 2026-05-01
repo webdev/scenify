@@ -48,6 +48,7 @@ function rowToGeneration(
     packRole: row.packRole ?? undefined,
     packShotIndex: row.packShotIndex ?? undefined,
     shotFraming: row.shotFraming ?? undefined,
+    parentGenerationId: row.parentGenerationId ?? undefined,
     sourceColors:
       (row.sourceColors as Generation["sourceColors"]) ?? undefined,
     outputColors:
@@ -141,6 +142,7 @@ export async function addGeneration(g: Generation): Promise<Generation> {
     packRole: g.packRole,
     packShotIndex: g.packShotIndex,
     shotFraming: g.shotFraming,
+    parentGenerationId: g.parentGenerationId,
     sourceColors: g.sourceColors,
     outputColors: g.outputColors,
     colorMaxDeltaE: g.colorMaxDeltaE,
@@ -178,6 +180,7 @@ export async function updateGeneration(
     packRole: patch.packRole,
     packShotIndex: patch.packShotIndex,
     shotFraming: patch.shotFraming,
+    parentGenerationId: patch.parentGenerationId,
     sourceColors: patch.sourceColors,
     outputColors: patch.outputColors,
     colorMaxDeltaE: patch.colorMaxDeltaE,

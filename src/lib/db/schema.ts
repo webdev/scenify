@@ -115,6 +115,9 @@ export const generation = pgTable("generation", {
   packRole: text("pack_role"),
   packShotIndex: integer("pack_shot_index"),
   shotFraming: text("shot_framing"),
+  // Complete-look follow-ups: when a generation is a continuation of another
+  // (same model + garment, different pose), this points at the parent.
+  parentGenerationId: text("parent_generation_id"),
   // Color fidelity tracking (phase 1: pre-flight; phase 2: post-flight verification)
   sourceColors: jsonb("source_colors"),
   outputColors: jsonb("output_colors"),
