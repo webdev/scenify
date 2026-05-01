@@ -107,6 +107,18 @@ export async function listGenerations(
   return rows.map(rowToGeneration);
 }
 
+export async function listGenerationsByPackId(
+  packId: string,
+): Promise<Generation[]> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(schema.generation)
+    .where(eq(schema.generation.packId, packId))
+    .orderBy(desc(schema.generation.createdAt));
+  return rows.map(rowToGeneration);
+}
+
 export async function getGeneration(id: string): Promise<Generation | undefined> {
   const db = getDb();
   const rows = await db
