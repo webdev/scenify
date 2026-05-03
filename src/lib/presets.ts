@@ -107,6 +107,7 @@ export async function loadPublicPresets(): Promise<PublicPreset[]> {
       palette: schema.preset.palette,
       displayOrder: schema.preset.displayOrder,
       heroImageUrl: schema.preset.heroImageUrl,
+      isPro: schema.preset.isPro,
     })
     .from(schema.preset)
     .orderBy(asc(schema.preset.displayOrder), asc(schema.preset.slug));
@@ -132,6 +133,7 @@ export async function loadPublicPresets(): Promise<PublicPreset[]> {
       palette: r.palette,
       displayOrder: r.displayOrder,
       heroImageUrl,
+      isPro: r.isPro,
     });
   }
   return out;

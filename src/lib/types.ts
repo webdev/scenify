@@ -387,6 +387,7 @@ export interface PublicPreset {
   palette: string[];
   displayOrder: number;
   heroImageUrl: string | null;
+  isPro: boolean;
 }
 
 export interface DB {
