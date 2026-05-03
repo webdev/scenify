@@ -743,7 +743,7 @@ export default function Dashboard({
             </button>
             {presets.map((p) => {
               const isActive = p.id === presetId;
-              const previewUrl = p.referenceImageUrls[0];
+              const previewUrl = p.heroImageUrl ?? p.referenceImageUrls[0];
               const isDropTarget = dropTargetPresetId === p.dbId;
               return (
                 <div
