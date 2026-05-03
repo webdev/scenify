@@ -231,6 +231,7 @@ NextAuth:
 - Storage layer ([src/lib/storage.ts](src/lib/storage.ts)) is the only swap-point for image persistence; [src/lib/db.ts](src/lib/db.ts) is the only swap-point for metadata persistence. Don't introduce new abstractions on top of them.
 - Don't move preset scene-specific text into a system prompt or template. References carry the scene; the system prompt stays generic.
 - Don't reintroduce a user-selectable Register dropdown — it's auto-picked.
+- **Every endpoint that produces a `generations` row with `outputUrl` MUST call `detectFocalPoint(buffer, mimeType)` after the post-resize step and persist both `focalPoint` and `faceBox` on the row.** The result MUST also be included in the JSON/stream response. Today this applies to `POST /api/generations` (streaming `done` event), `POST /api/internal/generations` (response body), and `POST /api/internal/complete-look` (per-shot worker → polled by `/api/internal/complete-look/[packId]`). Vesperdrop's face-safe rendering and crop logic depend on this; pack shots silently degrade to centered crops when it's missing. New endpoints follow the same pattern — no exceptions.
 
 ## Known limits / TODO before scaling
 
