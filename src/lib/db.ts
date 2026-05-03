@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "./db/client";
 import type {
+  FocalPointSource,
   Generation,
   GenerationStatus,
   ImageModelId,
@@ -55,6 +56,19 @@ function rowToGeneration(
       (row.outputColors as Generation["outputColors"]) ?? undefined,
     colorMaxDeltaE: row.colorMaxDeltaE ?? undefined,
     colorAvgDeltaE: row.colorAvgDeltaE ?? undefined,
+    focalPoint:
+      row.focalPointX != null &&
+      row.focalPointY != null &&
+      row.focalPointConfidence != null &&
+      row.focalPointSource != null
+        ? {
+            x: row.focalPointX,
+            y: row.focalPointY,
+            confidence: row.focalPointConfidence,
+            source: row.focalPointSource as FocalPointSource,
+          }
+        : undefined,
+    faceBox: (row.faceBox as Generation["faceBox"]) ?? undefined,
     createdAt: row.createdAt.toISOString(),
     completedAt: row.completedAt ? row.completedAt.toISOString() : undefined,
   };
@@ -159,6 +173,11 @@ export async function addGeneration(g: Generation): Promise<Generation> {
     outputColors: g.outputColors,
     colorMaxDeltaE: g.colorMaxDeltaE,
     colorAvgDeltaE: g.colorAvgDeltaE,
+    focalPointX: g.focalPoint?.x,
+    focalPointY: g.focalPoint?.y,
+    focalPointConfidence: g.focalPoint?.confidence,
+    focalPointSource: g.focalPoint?.source,
+    faceBox: g.faceBox ?? undefined,
     completedAt: g.completedAt ? new Date(g.completedAt) : undefined,
   });
   return g;
@@ -197,6 +216,14 @@ export async function updateGeneration(
     outputColors: patch.outputColors,
     colorMaxDeltaE: patch.colorMaxDeltaE,
     colorAvgDeltaE: patch.colorAvgDeltaE,
+    focalPointX: patch.focalPoint?.x,
+    focalPointY: patch.focalPoint?.y,
+    focalPointConfidence: patch.focalPoint?.confidence,
+    focalPointSource: patch.focalPoint?.source,
+    faceBox:
+      patch.faceBox === undefined
+        ? undefined
+        : (patch.faceBox as unknown as Record<string, unknown> | null),
     completedAt: patch.completedAt ? new Date(patch.completedAt) : undefined,
   };
   // Strip undefined keys so we don't overwrite columns with NULL.

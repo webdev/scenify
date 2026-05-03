@@ -11,6 +11,7 @@ export const maxDuration = 60;
 const PatchBody = z.object({
   name: z.string().min(1).max(120).optional(),
   description: z.string().max(500).optional(),
+  isPro: z.boolean().optional(),
 });
 
 export async function PATCH(
@@ -41,6 +42,7 @@ export async function PATCH(
       slug: schema.preset.slug,
       name: schema.preset.name,
       description: schema.preset.description,
+      isPro: schema.preset.isPro,
     });
   if (updated.length === 0) {
     return NextResponse.json({ error: "not found" }, { status: 404 });

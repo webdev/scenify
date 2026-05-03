@@ -21,6 +21,7 @@ export const preset = pgTable("preset", {
   palette: text("palette").array().notNull().default(sql`'{}'::text[]`),
   displayOrder: integer("display_order").notNull().default(0),
   heroImageUrl: text("hero_image_url"),
+  isPro: boolean("is_pro").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .default(sql`NOW()`),
@@ -123,6 +124,14 @@ export const generation = pgTable("generation", {
   outputColors: jsonb("output_colors"),
   colorMaxDeltaE: real("color_max_delta_e"),
   colorAvgDeltaE: real("color_avg_delta_e"),
+  // Focal-point metadata for downstream aspect-ratio cropping. Always written
+  // on success (center fallback when detection is low-confidence). Coords are
+  // 0..1 normalized against the persisted output image's natural size.
+  focalPointX: real("focal_point_x"),
+  focalPointY: real("focal_point_y"),
+  focalPointConfidence: real("focal_point_confidence"),
+  focalPointSource: text("focal_point_source"),
+  faceBox: jsonb("face_box"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .default(sql`NOW()`),

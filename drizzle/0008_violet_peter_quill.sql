@@ -1,0 +1,1 @@
+ALTER TABLE "preset" ADD COLUMN "is_pro" boolean DEFAULT false NOT NULL;

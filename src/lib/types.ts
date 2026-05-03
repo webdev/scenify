@@ -314,8 +314,32 @@ export interface Generation {
   outputColors?: ColorSwatchSerialized[];
   colorMaxDeltaE?: number;
   colorAvgDeltaE?: number;
+  /** Focal-point metadata for downstream aspect-ratio cropping. Always
+   * populated on success — falls back to image center when detection is
+   * low-confidence. Coords are 0..1 normalized against the persisted output. */
+  focalPoint?: FocalPoint;
+  /** Dominant subject's face bbox (0..1 normalized). Present iff a face was
+   * detected with high confidence. */
+  faceBox?: FaceBox | null;
   createdAt: string;
   completedAt?: string;
+}
+
+export type FocalPointSource = "face" | "saliency" | "center";
+
+export interface FocalPoint {
+  x: number;
+  y: number;
+  confidence: number;
+  source: FocalPointSource;
+}
+
+export interface FaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence: number;
 }
 
 export interface ColorSwatchSerialized {
@@ -346,6 +370,7 @@ export interface Preset {
   palette: string[];
   displayOrder: number;
   heroImageUrl: string | null;
+  isPro: boolean;
   /** URL-only list (back-compat for callers that only need URLs). */
   referenceImageUrls: string[];
   /** Full reference info — needed for justified-rows masonry + admin actions. */

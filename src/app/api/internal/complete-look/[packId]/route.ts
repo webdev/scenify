@@ -57,6 +57,8 @@ export async function GET(
       error: r.error ?? null,
       seed: r.seed,
       colorMaxDeltaE: r.colorMaxDeltaE ?? null,
+      focalPoint: r.focalPoint ?? { x: 0.5, y: 0.5, confidence: 1, source: "center" },
+      faceBox: r.faceBox ?? null,
     })),
     callerProjectId: verified.claims.project_id,
   });

@@ -17,6 +17,7 @@ import {
   comparePalettes,
   extractDominantColors,
 } from "@/lib/color-extraction";
+import { detectFocalPoint } from "@/lib/focal-point";
 import type {
   Generation,
   ImageModelId,
@@ -286,6 +287,8 @@ export async function POST(req: Request) {
           "gen",
         );
 
+        const focal = await detectFocalPoint(resized.buffer, resized.mimeType);
+
         const finalized = await updateGeneration(generation.id, {
           status: "succeeded",
           outputUrl: stored.url,
@@ -298,6 +301,8 @@ export async function POST(req: Request) {
           outputColors,
           colorMaxDeltaE: comparison.maxDeltaE,
           colorAvgDeltaE: comparison.avgDeltaE,
+          focalPoint: focal.focalPoint,
+          faceBox: focal.faceBox,
           completedAt: new Date().toISOString(),
         });
         send({ type: "done", generation: finalized! });

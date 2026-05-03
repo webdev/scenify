@@ -14,6 +14,7 @@ import {
   comparePalettes,
   extractDominantColors,
 } from "@/lib/color-extraction";
+import { detectFocalPoint } from "@/lib/focal-point";
 import { readBearer, verifyVercelOidc } from "@/lib/oidc-verify";
 import { LISTING_PACKS, type PackPlatform } from "@/lib/listing-packs";
 import { planCompleteLookShot } from "@/lib/complete-look";
@@ -95,6 +96,8 @@ async function executeShot(opts: {
       "gen",
     );
 
+    const focal = await detectFocalPoint(resized.buffer, resized.mimeType);
+
     await updateGeneration(shot.generationId, {
       status: "succeeded",
       outputUrl: stored.url,
@@ -107,6 +110,8 @@ async function executeShot(opts: {
       outputColors,
       colorMaxDeltaE: comparison.maxDeltaE,
       colorAvgDeltaE: comparison.avgDeltaE,
+      focalPoint: focal.focalPoint,
+      faceBox: focal.faceBox,
       completedAt: new Date().toISOString(),
     });
   } catch (err) {

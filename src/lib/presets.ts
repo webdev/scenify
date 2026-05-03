@@ -32,6 +32,7 @@ export async function loadPresets(): Promise<Preset[]> {
         palette: p.palette,
         displayOrder: p.displayOrder,
         heroImageUrl: p.heroImageUrl,
+        isPro: p.isPro,
         referenceImageUrls: images.map((r) => r.url),
         referenceImages: images.map((r) => ({
           id: r.id,
@@ -76,6 +77,7 @@ export async function loadPreset(slug: string): Promise<Preset | undefined> {
     palette: p.palette,
     displayOrder: p.displayOrder,
     heroImageUrl: p.heroImageUrl,
+    isPro: p.isPro,
     referenceImageUrls: images.map((r) => r.url),
     referenceImages: images.map((r) => ({
       id: r.id,

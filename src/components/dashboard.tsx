@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  FaceBox,
+  FocalPoint,
   Generation,
   ImageModelId,
   ImageQuality,
@@ -904,6 +906,15 @@ export default function Dashboard({
                         </svg>
                       </span>
                     )}
+                    {p.isPro && (
+                      <span
+                        className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-md bg-amber-400/95 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-950 shadow"
+                        title="Pro preset"
+                      >
+                        <CrownIcon className="h-2.5 w-2.5" />
+                        Pro
+                      </span>
+                    )}
                   </div>
                   <div className="px-2 py-1.5">
                     <div
@@ -1692,6 +1703,7 @@ function EditPresetModal({
 }) {
   const [name, setName] = useState(preset?.name ?? "");
   const [description, setDescription] = useState(preset?.description ?? "");
+  const [isPro, setIsPro] = useState(preset?.isPro ?? false);
   const [saving, setSaving] = useState(false);
   const [rerolling, setRerolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1713,7 +1725,7 @@ function EditPresetModal({
       const res = await fetch(`/api/admin/presets/${preset.dbId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim(), isPro }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
@@ -1810,6 +1822,20 @@ function EditPresetModal({
               Two or three uppercase words separated by &nbsp;·&nbsp;
             </div>
           </div>
+          <label className="flex cursor-pointer items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={isPro}
+              onChange={(e) => setIsPro(e.target.checked)}
+              className="h-4 w-4 accent-amber-500"
+            />
+            <span className="inline-flex items-center gap-1">
+              <CrownIcon className="h-3.5 w-3.5 text-amber-500" />
+              <span className="font-medium uppercase tracking-wide text-zinc-700 dark:text-zinc-200">
+                Pro preset
+              </span>
+            </span>
+          </label>
           {error && (
             <div className="rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200">
               {error}
@@ -2133,6 +2159,17 @@ function GenerationCard({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [completePlatformOpen, setCompletePlatformOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [showFocal, setShowFocal] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [detectedOverride, setDetectedOverride] = useState<{
+    focalPoint: FocalPoint;
+    faceBox: FaceBox | null;
+  } | null>(null);
+  const focalPoint = detectedOverride?.focalPoint ?? gen.focalPoint;
+  const faceBox =
+    detectedOverride !== null
+      ? detectedOverride.faceBox
+      : (gen.faceBox ?? null);
   const completeBtnRef = useRef<HTMLButtonElement>(null);
   const isLive = progress && progress.phase !== "done" && progress.phase !== "error";
   const profileMeta = SIZE_PROFILES.find((p) => p.id === gen.sizeProfile);
@@ -2195,6 +2232,9 @@ function GenerationCard({
               }}
               className="h-full w-full object-cover"
             />
+            {showFocal && focalPoint && (
+              <FocalPointOverlay focalPoint={focalPoint} faceBox={faceBox} />
+            )}
           </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center text-xs text-zinc-500">
@@ -2295,6 +2335,55 @@ function GenerationCard({
               title="Generate matching shots that continue this look (same model, same garment)"
             >
               {completing ? "Planning…" : "✨ Complete look"}
+            </button>
+          )}
+          {gen.status === "succeeded" && focalPoint && (
+            <button
+              onClick={() => setShowFocal((s) => !s)}
+              className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                showFocal
+                  ? "bg-amber-400 text-zinc-900 hover:bg-amber-300"
+                  : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              }`}
+              title={`Focal point: ${focalPoint.source} (conf ${focalPoint.confidence.toFixed(2)})${
+                faceBox ? " · face detected" : ""
+              }`}
+            >
+              {showFocal ? "Hide face" : "Show face"}
+            </button>
+          )}
+          {gen.status === "succeeded" && gen.outputUrl && !focalPoint && (
+            <button
+              onClick={async () => {
+                if (detecting) return;
+                setDetecting(true);
+                try {
+                  const res = await fetch(
+                    `/api/admin/generations/${gen.id}/detect-focal`,
+                    { method: "POST" },
+                  );
+                  const json = await res.json();
+                  if (!res.ok) {
+                    throw new Error(json?.error ?? `HTTP ${res.status}`);
+                  }
+                  setDetectedOverride({
+                    focalPoint: json.focalPoint,
+                    faceBox: json.faceBox ?? null,
+                  });
+                  setShowFocal(true);
+                } catch (err) {
+                  alert(
+                    `Detect failed: ${err instanceof Error ? err.message : err}`,
+                  );
+                } finally {
+                  setDetecting(false);
+                }
+              }}
+              disabled={detecting}
+              className="rounded-md border border-amber-400 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-500/60 dark:bg-amber-900/20 dark:text-amber-200 dark:hover:bg-amber-900/40"
+              title="Run focal-point detection on this older generation"
+            >
+              {detecting ? "Detecting…" : "Detect face"}
             </button>
           )}
           {completePlatformOpen && completeBtnRef.current && (
@@ -2897,6 +2986,47 @@ function SizeBadge({
   );
 }
 
+function FocalPointOverlay({
+  focalPoint,
+  faceBox,
+}: {
+  focalPoint: FocalPoint;
+  faceBox: FaceBox | null;
+}) {
+  const xPct = focalPoint.x * 100;
+  const yPct = focalPoint.y * 100;
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      {faceBox && (
+        <div
+          className="absolute border-2 border-amber-400/90 bg-amber-400/15 shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"
+          style={{
+            left: `${faceBox.x * 100}%`,
+            top: `${faceBox.y * 100}%`,
+            width: `${faceBox.width * 100}%`,
+            height: `${faceBox.height * 100}%`,
+          }}
+        >
+          <span className="absolute -top-4 left-0 rounded-sm bg-amber-400 px-1 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider text-zinc-900">
+            face {faceBox.confidence.toFixed(2)}
+          </span>
+        </div>
+      )}
+      <div
+        className="absolute -translate-x-1/2 -translate-y-1/2"
+        style={{ left: `${xPct}%`, top: `${yPct}%` }}
+      >
+        <div className="h-3 w-3 rounded-full bg-amber-400 ring-2 ring-zinc-900/80 shadow-md" />
+        <div className="absolute left-1/2 top-1/2 h-px w-12 -translate-x-1/2 -translate-y-1/2 bg-amber-400/70" />
+        <div className="absolute left-1/2 top-1/2 h-12 w-px -translate-x-1/2 -translate-y-1/2 bg-amber-400/70" />
+      </div>
+      <div className="absolute bottom-1 left-1 rounded-sm bg-zinc-900/80 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-amber-300">
+        {focalPoint.source} · {focalPoint.confidence.toFixed(2)} · ({xPct.toFixed(0)}%, {yPct.toFixed(0)}%)
+      </div>
+    </div>
+  );
+}
+
 function ProgressBar({ percent }: { percent: number }) {
   const clamped = Math.max(0, Math.min(100, percent));
   return (
@@ -3004,5 +3134,18 @@ function StatusBadge({ status }: { status: Generation["status"] }) {
     >
       {status}
     </span>
+  );
+}
+
+function CrownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M2 5.25a.75.75 0 0 1 1.2-.6L5.5 6.4l1.85-3.08a.75.75 0 0 1 1.3 0L10.5 6.4l2.3-1.75a.75.75 0 0 1 1.2.6V11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11V5.25Zm1.5 8.25h9a.5.5 0 0 0 0-1h-9a.5.5 0 0 0 0 1Z" />
+    </svg>
   );
 }
