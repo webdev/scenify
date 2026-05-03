@@ -15,6 +15,7 @@ import {
   comparePalettes,
   extractDominantColors,
 } from "@/lib/color-extraction";
+import { detectFocalPoint } from "@/lib/focal-point";
 import { readBearer, verifyVercelOidc } from "@/lib/oidc-verify";
 import type {
   Generation,
@@ -159,6 +160,8 @@ export async function POST(req: Request) {
       "gen",
     );
 
+    const focal = await detectFocalPoint(resized.buffer, resized.mimeType);
+
     const finalized = await updateGeneration(generation.id, {
       status: "succeeded",
       outputUrl: stored.url,
@@ -171,6 +174,8 @@ export async function POST(req: Request) {
       outputColors,
       colorMaxDeltaE: comparison.maxDeltaE,
       colorAvgDeltaE: comparison.avgDeltaE,
+      focalPoint: focal.focalPoint,
+      faceBox: focal.faceBox,
       completedAt: new Date().toISOString(),
     });
 
@@ -183,6 +188,8 @@ export async function POST(req: Request) {
       seed: finalized!.seed,
       colorMaxDeltaE: finalized!.colorMaxDeltaE,
       colorAvgDeltaE: finalized!.colorAvgDeltaE,
+      focalPoint: finalized!.focalPoint,
+      faceBox: finalized!.faceBox,
       callerProjectId: verified.claims.project_id,
       callerRef: input.callerRef,
     });

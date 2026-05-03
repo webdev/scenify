@@ -17,7 +17,7 @@ import {
   comparePalettes,
   extractDominantColors,
 } from "@/lib/color-extraction";
-import { detectFocalPoint } from "@/lib/focal-point";
+import { detectFocalPoint, withFocalDefaults } from "@/lib/focal-point";
 import type {
   Generation,
   ImageModelId,
@@ -90,7 +90,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const sourceId = url.searchParams.get("sourceId") ?? undefined;
   const generations = await listGenerations(sourceId);
-  return NextResponse.json({ generations });
+  return NextResponse.json({ generations: generations.map(withFocalDefaults) });
 }
 
 export async function POST(req: Request) {
@@ -305,7 +305,7 @@ export async function POST(req: Request) {
           faceBox: focal.faceBox,
           completedAt: new Date().toISOString(),
         });
-        send({ type: "done", generation: finalized! });
+        send({ type: "done", generation: withFocalDefaults(finalized!) });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         const failed = await updateGeneration(generation.id, {

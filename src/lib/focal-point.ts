@@ -1,7 +1,7 @@
 import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
-import type { FaceBox, FocalPoint } from "./types";
+import type { FaceBox, FocalPoint, Generation } from "./types";
 
 const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY ?? "",
@@ -20,6 +20,16 @@ export const CENTER_FOCAL_POINT: FocalPoint = {
   confidence: 1,
   source: "center",
 };
+
+export function withFocalDefaults<T extends Pick<Generation, "focalPoint" | "faceBox">>(
+  g: T,
+): T & { focalPoint: FocalPoint; faceBox: FaceBox | null } {
+  return {
+    ...g,
+    focalPoint: g.focalPoint ?? CENTER_FOCAL_POINT,
+    faceBox: g.faceBox ?? null,
+  };
+}
 
 const Schema = z.object({
   hasFace: z
