@@ -13,7 +13,7 @@ const Body = z.object({
   platform: z.enum(["amazon", "shopify", "instagram", "tiktok"]),
   model: z
     .enum(["gpt-image-2", "nano-banana-2", "flux-kontext", "flux-2"])
-    .default("flux-kontext"),
+    .default("gpt-image-2"),
   quality: z.enum(["low", "medium", "high", "auto"]).default("low"),
 });
 

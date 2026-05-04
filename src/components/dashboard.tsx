@@ -530,7 +530,7 @@ export default function Dashboard({
           body: JSON.stringify({
             generationId: gen.id,
             platform,
-            model: "flux-kontext",
+            model: "gpt-image-2",
             quality: gen.quality,
           }),
         });
@@ -598,6 +598,26 @@ export default function Dashboard({
     },
     [runGeneration],
   );
+
+  const onDelete = useCallback(async (gen: Generation) => {
+    if (!confirm("Permanently delete this generation?")) return;
+    const prev = gen;
+    setGenerations((gs) => gs.filter((g) => g.id !== gen.id));
+    try {
+      const res = await fetch(`/api/generations/${gen.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setGenerations((gs) => [prev, ...gs]);
+      alert(
+        `Couldn't delete: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }, []);
 
   const onGenerateBatch = useCallback(async () => {
     if (!presetId) return;
@@ -1703,6 +1723,7 @@ export default function Dashboard({
                         progress={progress}
                         onRegenerateNewSeed={onRegenerateNewSeed}
                         onRetry={onRetry}
+                        onDelete={onDelete}
                         onAddToPreset={onAddImageToPreset}
                         onCompleteLook={onCompleteLook}
                       />
@@ -2082,6 +2103,7 @@ function SourceGenerations({
   progress,
   onRegenerateNewSeed,
   onRetry,
+  onDelete,
   onAddToPreset,
   onCompleteLook,
 }: {
@@ -2090,6 +2112,7 @@ function SourceGenerations({
   progress: Map<string, ProgressState>;
   onRegenerateNewSeed: (gen: Generation) => void;
   onRetry: (gen: Generation) => void;
+  onDelete: (gen: Generation) => void;
   onAddToPreset: (
     presetDbId: string,
     presetName: string,
@@ -2160,6 +2183,7 @@ function SourceGenerations({
                     progress={progress.get(g.id) ?? null}
                     onRegenerateNewSeed={onRegenerateNewSeed}
                     onRetry={onRetry}
+                    onDelete={onDelete}
                     presets={presets}
                     onAddToPreset={onAddToPreset}
                     onCompleteLook={onCompleteLook}
@@ -2180,6 +2204,7 @@ function SourceGenerations({
                 progress={progress.get(g.id) ?? null}
                 onRegenerateNewSeed={onRegenerateNewSeed}
                 onRetry={onRetry}
+                onDelete={onDelete}
                 presets={presets}
                 onAddToPreset={onAddToPreset}
                 onCompleteLook={onCompleteLook}
@@ -2198,6 +2223,7 @@ function GenerationCard({
   progress,
   onRegenerateNewSeed,
   onRetry,
+  onDelete,
   presets,
   onAddToPreset,
   onCompleteLook,
@@ -2207,6 +2233,7 @@ function GenerationCard({
   progress: ProgressState | null;
   onRegenerateNewSeed: (gen: Generation) => void;
   onRetry: (gen: Generation) => void;
+  onDelete: (gen: Generation) => void;
   presets: Preset[];
   onAddToPreset: (
     presetDbId: string,
@@ -2250,7 +2277,7 @@ function GenerationCard({
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
       <div
-        className={`relative ${fallbackAspect} w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950`}
+        className={`group relative ${fallbackAspect} w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950`}
         style={aspectStyle}
       >
         {gen.outputUrl ? (
@@ -2319,6 +2346,18 @@ function GenerationCard({
             )}
           </div>
         )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(gen);
+          }}
+          className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-zinc-900/70 text-white opacity-0 backdrop-blur transition hover:bg-rose-600 focus:opacity-100 group-hover:opacity-100"
+          aria-label="Delete this generation"
+          title="Permanently delete this generation"
+        >
+          <span aria-hidden="true" className="text-sm leading-none">×</span>
+        </button>
         {isLive && progress && (
           <div className="absolute inset-x-0 bottom-0 bg-zinc-900/80 px-3 pb-2 pt-1.5 text-white backdrop-blur">
             <ProgressBar percent={progress.percent} />

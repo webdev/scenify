@@ -241,4 +241,12 @@ export async function updateGeneration(
   return getGeneration(id);
 }
 
+export async function deleteGeneration(id: string): Promise<Generation | undefined> {
+  const db = getDb();
+  const existing = await getGeneration(id);
+  if (!existing) return undefined;
+  await db.delete(schema.generation).where(eq(schema.generation.id, id));
+  return existing;
+}
+
 export { loadPreset as getPreset, loadPresets as listPresets } from "./presets";
