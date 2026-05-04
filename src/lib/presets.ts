@@ -33,6 +33,7 @@ export async function loadPresets(): Promise<Preset[]> {
         displayOrder: p.displayOrder,
         heroImageUrl: p.heroImageUrl,
         isPro: p.isPro,
+        isWip: p.isWip,
         referenceImageUrls: images.map((r) => r.url),
         referenceImages: images.map((r) => ({
           id: r.id,
@@ -78,6 +79,7 @@ export async function loadPreset(slug: string): Promise<Preset | undefined> {
     displayOrder: p.displayOrder,
     heroImageUrl: p.heroImageUrl,
     isPro: p.isPro,
+    isWip: p.isWip,
     referenceImageUrls: images.map((r) => r.url),
     referenceImages: images.map((r) => ({
       id: r.id,
@@ -110,6 +112,7 @@ export async function loadPublicPresets(): Promise<PublicPreset[]> {
       isPro: schema.preset.isPro,
     })
     .from(schema.preset)
+    .where(eq(schema.preset.isWip, false))
     .orderBy(asc(schema.preset.displayOrder), asc(schema.preset.slug));
 
   const out: PublicPreset[] = [];

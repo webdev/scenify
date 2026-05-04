@@ -1,0 +1,1 @@
+ALTER TABLE "preset" ADD COLUMN "is_wip" boolean DEFAULT false NOT NULL;

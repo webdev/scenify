@@ -96,7 +96,7 @@ export default function Dashboard({
 
   const [presetId, setPresetId] = useState<string>(presets[0]?.id ?? "");
   const [model, setModel] = useState<ImageModelId>("gpt-image-2");
-  const [quality, setQuality] = useState<ImageQuality>("low");
+  const [quality, setQuality] = useState<ImageQuality>("high");
   const [sizeProfile, setSizeProfile] =
     useState<SizeProfileId>("square-1024");
   const [packPlatform, setPackPlatform] = useState<PackPlatform>("amazon");
@@ -915,6 +915,56 @@ export default function Dashboard({
                         Pro
                       </span>
                     )}
+                    {p.isWip && (
+                      <span
+                        className="absolute bottom-1.5 left-1.5 inline-flex items-center rounded-md bg-orange-500/95 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow"
+                        title="WIP — hidden from public API"
+                      >
+                        WIP
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          const res = await fetch(
+                            `/api/admin/presets/${p.dbId}`,
+                            {
+                              method: "PATCH",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({ isWip: !p.isWip }),
+                            },
+                          );
+                          if (!res.ok) {
+                            const j = await res.json().catch(() => ({}));
+                            throw new Error(j?.error ?? `HTTP ${res.status}`);
+                          }
+                          router.refresh();
+                        } catch (err) {
+                          alert(
+                            `Toggle failed: ${err instanceof Error ? err.message : err}`,
+                          );
+                        }
+                      }}
+                      title={
+                        p.isWip
+                          ? "Hidden from public API — click to publish"
+                          : "Visible — click to hide (WIP)"
+                      }
+                      aria-label={p.isWip ? "Publish preset" : "Hide preset"}
+                      className={`absolute bottom-1.5 right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-white shadow transition ${
+                        p.isWip
+                          ? "bg-orange-500/95 hover:bg-orange-600"
+                          : "bg-black/40 opacity-0 hover:bg-black/70 group-hover:opacity-100"
+                      }`}
+                    >
+                      {p.isWip ? (
+                        <EyeOffIcon className="h-3.5 w-3.5" />
+                      ) : (
+                        <EyeIcon className="h-3.5 w-3.5" />
+                      )}
+                    </button>
                   </div>
                   <div className="px-2 py-1.5">
                     <div
@@ -1704,6 +1754,7 @@ function EditPresetModal({
   const [name, setName] = useState(preset?.name ?? "");
   const [description, setDescription] = useState(preset?.description ?? "");
   const [isPro, setIsPro] = useState(preset?.isPro ?? false);
+  const [isWip, setIsWip] = useState(preset?.isWip ?? false);
   const [saving, setSaving] = useState(false);
   const [rerolling, setRerolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1725,7 +1776,7 @@ function EditPresetModal({
       const res = await fetch(`/api/admin/presets/${preset.dbId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), description: description.trim(), isPro }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim(), isPro, isWip }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
@@ -1834,6 +1885,17 @@ function EditPresetModal({
               <span className="font-medium uppercase tracking-wide text-zinc-700 dark:text-zinc-200">
                 Pro preset
               </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={isWip}
+              onChange={(e) => setIsWip(e.target.checked)}
+              className="h-4 w-4 accent-orange-500"
+            />
+            <span className="font-medium uppercase tracking-wide text-zinc-700 dark:text-zinc-200">
+              WIP — hide from public API
             </span>
           </label>
           {error && (
@@ -3146,6 +3208,43 @@ function CrownIcon({ className }: { className?: string }) {
       aria-hidden="true"
     >
       <path d="M2 5.25a.75.75 0 0 1 1.2-.6L5.5 6.4l1.85-3.08a.75.75 0 0 1 1.3 0L10.5 6.4l2.3-1.75a.75.75 0 0 1 1.2.6V11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11V5.25Zm1.5 8.25h9a.5.5 0 0 0 0-1h-9a.5.5 0 0 0 0 1Z" />
+    </svg>
+  );
+}
+
+function EyeIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
+      <circle cx="8" cy="8" r="2" />
+    </svg>
+  );
+}
+
+function EyeOffIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M2 2l12 12" />
+      <path d="M6.5 4a7 7 0 0 1 1.5-.2c4 0 6.5 4.2 6.5 4.2a13.4 13.4 0 0 1-2 2.4M3.5 5.6A13.6 13.6 0 0 0 1.5 8s2.5 4.5 6.5 4.5a7 7 0 0 0 2.5-.5" />
+      <path d="M9.5 9.5a2 2 0 0 1-3-3" />
     </svg>
   );
 }

@@ -22,6 +22,7 @@ export const preset = pgTable("preset", {
   displayOrder: integer("display_order").notNull().default(0),
   heroImageUrl: text("hero_image_url"),
   isPro: boolean("is_pro").notNull().default(false),
+  isWip: boolean("is_wip").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .default(sql`NOW()`),

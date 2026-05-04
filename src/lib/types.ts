@@ -371,6 +371,7 @@ export interface Preset {
   displayOrder: number;
   heroImageUrl: string | null;
   isPro: boolean;
+  isWip: boolean;
   /** URL-only list (back-compat for callers that only need URLs). */
   referenceImageUrls: string[];
   /** Full reference info — needed for justified-rows masonry + admin actions. */
@@ -389,6 +390,8 @@ export interface PublicPreset {
   heroImageUrl: string | null;
   isPro: boolean;
 }
+
+// Note: PublicPreset has no isWip — WIP presets are filtered out of the public API entirely.
 
 export interface DB {
   sources: Source[];
